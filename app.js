@@ -1,5 +1,4 @@
 import { saveVaultHandle, getVaultHandle, enqueueLogEntry, enqueueRaw, getLogQueue, getRawQueue, clearLogKeys, clearRawKeys } from './db.js';
-import { extractTimestamp } from './exif.js';
 import * as vault from './vault.js';
 
 // ---- Constants ----
@@ -165,6 +164,7 @@ async function syncQueue() {
 
 // ---- Log tab ----
 function setupLogTab() {
+  $('btn-checkin').addEventListener('click', checkIn);
   $('btn-add-note').addEventListener('click', openNoteForm);
   $('note-cancel').addEventListener('click',  () => hide('note-form'));
   $('note-confirm').addEventListener('click', submitNote);
@@ -180,6 +180,32 @@ function setupLogTab() {
   $('photo-comment').addEventListener('input', () => {
     $('photo-confirm').disabled = !$('photo-comment').value.trim();
   });
+}
+
+async function checkIn() {
+  const btn = $('btn-checkin');
+  btn.disabled = true;
+  btn.textContent = 'Getting GPS…';
+
+  const time = nowHHMM();
+  let gps = null;
+
+  if (navigator.geolocation) {
+    gps = await new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        ()  => resolve(null),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    });
+  }
+
+  const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
+  await writeLogLine(`${time} | ${s.author} | 📍${gpsPart}`);
+  await loadLog();
+
+  btn.disabled = false;
+  btn.textContent = '📍 Check in';
 }
 
 function openNoteForm() {
@@ -203,17 +229,7 @@ async function onPhotoSelected(e) {
   if (!file) return;
   e.target.value = '';
 
-  const ts = await extractTimestamp(file) || nowHHMMSS();
-  s.pendingPhoto = { file, ts, gps: null };
-
-  // Request location in background — ready by the time user finishes typing comment
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      pos => { if (s.pendingPhoto) s.pendingPhoto.gps = { lat: pos.coords.latitude, lon: pos.coords.longitude }; },
-      () => {},
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
-    );
-  }
+  s.pendingPhoto = { file, ts: nowHHMMSS() };
 
   const prev = $('photo-preview');
   prev.src = URL.createObjectURL(file);
@@ -241,17 +257,16 @@ async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
   if (!comment || !s.pendingPhoto) return;
 
-  const { file, ts, gps } = s.pendingPhoto;
+  const { file, ts } = s.pendingPhoto;
   s.pendingPhoto = null;
   cancelPhotoForm(); // resets UI
 
-  const hms     = ts.replace(/:/g, '-');
-  const ext     = (file.name.split('.').pop() || 'jpg').toLowerCase();
-  const base    = `${hms}_${s.author}`;
-  const name    = await resolvePhotoName(base, ext);
-  const time    = ts.slice(0, 5);
-  const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
-  const line    = `${time} | ${s.author} | 📷 ${name} | "${comment}"${gpsPart}`;
+  const hms  = ts.replace(/:/g, '-');
+  const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const base = `${hms}_${s.author}`;
+  const name = await resolvePhotoName(base, ext);
+  const time = ts.slice(0, 5);
+  const line = `${time} | ${s.author} | 📷 ${name} | "${comment}"`;
 
   if (s.vault) {
     try {
@@ -318,6 +333,11 @@ function parseLogLine(line) {
   if (parts.length < 3) return null;
   const [time, author, ...rest] = parts;
   const body = rest.join(' | ');
+  if (body.startsWith('📍')) {
+    const gpsMatch = body.match(/📍\s*\|\s*([-\d.]+),([-\d.]+)/);
+    const gps = gpsMatch ? { lat: parseFloat(gpsMatch[1]), lon: parseFloat(gpsMatch[2]) } : null;
+    return { time: time.trim(), author: author.trim(), type: 'checkin', gps };
+  }
   if (body.startsWith('📷')) {
     const m = body.match(/📷\s*(\S+)\s*\|\s*"?(.+?)"?\s*$/);
     return m ? { time: time.trim(), author: author.trim(), type: 'photo', photo: m[1], comment: m[2] }
@@ -337,7 +357,15 @@ async function renderLog() {
     const li = document.createElement('li');
     li.className = 'log-entry';
     const timeEl = `<span class="entry-time">${entry.time}</span>`;
-    if (entry.type === 'photo') {
+    if (entry.type === 'checkin') {
+      li.className = 'log-entry checkin';
+      const coordsHtml = entry.gps
+        ? `<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
+        : '';
+      li.innerHTML = `${timeEl}<div class="entry-body">
+        <span class="checkin-label">📍 Checked in</span>${coordsHtml}
+      </div>`;
+    } else if (entry.type === 'photo') {
       let thumb = '';
       if (s.vault && entry.photo) {
         const url = await vault.getPhotoUrl(s.vault, TODAY, entry.photo);
