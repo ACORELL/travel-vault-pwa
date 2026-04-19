@@ -9,6 +9,11 @@ export async function pickVaultFolder() {
   return window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
 }
 
+export async function isVaultRoot(handle) {
+  try { await handle.getFileHandle('trip.md'); return true; }
+  catch { return false; }
+}
+
 // Query only — safe to call without a user gesture.
 export async function queryPermission(handle) {
   if (!handle) return 'denied';

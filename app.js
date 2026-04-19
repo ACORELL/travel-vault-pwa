@@ -66,6 +66,10 @@ async function resetApp() {
 $('pick-vault-btn').addEventListener('click', async () => {
   try {
     const handle = await vault.pickVaultFolder();
+    if (!await vault.isVaultRoot(handle)) {
+      $('vault-setup-error').textContent = 'Wrong folder — please select the Travel Vault root (it contains trip.md).';
+      return;
+    }
     await saveVaultHandle(handle);
     hide('vault-setup-overlay');
     show('app');
