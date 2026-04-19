@@ -359,11 +359,11 @@ async function renderLog() {
     const timeEl = `<span class="entry-time">${entry.time}</span>`;
     if (entry.type === 'checkin') {
       li.className = 'log-entry checkin';
-      const coordsHtml = entry.gps
-        ? `<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
-        : '';
+      const locationHtml = entry.gps
+        ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
+        : '<span class="checkin-no-gps">Location unavailable</span>';
       li.innerHTML = `${timeEl}<div class="entry-body">
-        <span class="checkin-label">📍 Checked in</span>${coordsHtml}
+        <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else if (entry.type === 'photo') {
       let thumb = '';
@@ -525,6 +525,30 @@ function showBanner(id = 'vault-banner') { $(id).classList.add('show'); }
 function hideBanner(id = 'vault-banner') { $(id).classList.remove('show'); }
 
 // ---- Helpers ----
+function checkinMapHtml(lat, lon) {
+  const zoom = 15;
+  const n = 1 << zoom;
+  const xt = (lon + 180) / 360 * n;
+  const latR = lat * Math.PI / 180;
+  const yt = (1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n;
+  const tx = Math.floor(xt), ty = Math.floor(yt);
+  const fx = xt - tx, fy = yt - ty;
+  const cw = 200, ch = 120;
+  const l0 = Math.round(cw / 2 - fx * 256);
+  const t0 = Math.round(ch / 2 - fy * 256);
+  // 2×2 tile grid — point always fully surrounded by map
+  const grid = [
+    [tx,   ty,   l0,       t0      ],
+    [tx+1, ty,   l0 + 256, t0      ],
+    [tx,   ty+1, l0,       t0 + 256],
+    [tx+1, ty+1, l0 + 256, t0 + 256],
+  ];
+  const imgs = grid.map(([x, y, l, t]) =>
+    `<img src="https://tile.openstreetmap.org/${zoom}/${x}/${y}.png" class="checkin-map-tile" style="left:${l}px;top:${t}px" alt="" crossorigin="anonymous">`
+  ).join('');
+  return `<div class="checkin-map-wrap">${imgs}<div class="checkin-map-pin">📍</div></div>`;
+}
+
 function nowHHMM()   { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function nowHHMMSS() { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
 function pad(n)      { return String(n).padStart(2, '0'); }

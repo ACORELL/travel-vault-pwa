@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'tv-phone-v7';
+const CACHE = 'tv-phone-v8';
 const SHELL = ['./', './index.html', './app.js', './db.js', './vault.js', './exif.js', './manifest.json'];
 
 self.addEventListener('install', e => {
