@@ -48,8 +48,14 @@ async function writeText(dirHandle, filename, content) {
 async function writeBlob(dirHandle, filename, blob) {
   const fh = await dirHandle.getFileHandle(filename, { create: true });
   const w  = await fh.createWritable();
-  await w.write(blob);
-  await w.close();
+  try {
+    await w.write(blob);
+    await w.close();
+  } catch (e) {
+    await w.abort().catch(() => {});
+    await dirHandle.removeEntry(filename).catch(() => {});
+    throw e;
+  }
 }
 
 // ---- Log ----
