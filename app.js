@@ -57,7 +57,8 @@ $('pick-vault-btn').addEventListener('click', async () => {
     startApp(handle);
   } catch (e) {
     if (e.name !== 'AbortError') {
-      $('vault-setup-error').textContent = 'Could not access folder — please try again.';
+      console.error('Vault picker error:', e);
+      $('vault-setup-error').textContent = e.message || 'Could not access folder — please try again.';
     }
   }
 });
