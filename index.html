@@ -121,12 +121,22 @@
     .type-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .type-chip { padding: 6px 13px; border: 1.5px solid var(--border); border-radius: 20px; font-size: 13px; background: none; cursor: pointer; font-family: inherit; }
     .type-chip.selected { border-color: #1a1a1a; background: #1a1a1a; color: #fff; }
+    #raw-rating-section { margin-top: 14px; }
+    .rating-label { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    .rating-stars { display: flex; gap: 4px; }
+    .rating-star { font-size: 30px; color: var(--border); background: none; border: none; cursor: pointer; line-height: 1; padding: 2px 4px; font-family: inherit; -webkit-tap-highlight-color: transparent; }
+    .rating-star.active { color: #f59e0b; }
     .save-btn { width: 100%; margin-top: 12px; padding: 13px; font-size: 15px; font-weight: 600; background: #1a1a1a; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; }
     .save-btn:disabled { background: var(--border); color: var(--muted); }
+    .raw-divider { display: flex; align-items: center; gap: 10px; margin: 28px 0 16px; }
+    .raw-divider::before, .raw-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .raw-divider span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; white-space: nowrap; }
     .raw-history { margin-top: 24px; }
     .raw-history h4 { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; }
     .raw-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 1.4; }
-    .raw-type { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 3px; }
+    .raw-item-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+    .raw-type { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .raw-rating { font-size: 12px; color: #f59e0b; }
 
     /* ---- Wiki tab ---- */
     .wiki-search { width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: var(--surface); margin-bottom: 16px; -webkit-appearance: none; }
@@ -216,7 +226,22 @@
         <button class="type-chip" data-type="transport">Transport</button>
         <button class="type-chip" data-type="area">Area</button>
       </div>
+      <div id="raw-rating-section" class="hidden">
+        <p class="rating-label">Your rating</p>
+        <div class="rating-stars">
+          <button class="rating-star" data-rating="1">★</button>
+          <button class="rating-star" data-rating="2">★</button>
+          <button class="rating-star" data-rating="3">★</button>
+          <button class="rating-star" data-rating="4">★</button>
+          <button class="rating-star" data-rating="5">★</button>
+        </div>
+      </div>
       <button id="raw-save-btn" class="save-btn" disabled>Save to Wiki Raw</button>
+
+      <div class="raw-divider"><span>Article / Guide</span></div>
+      <textarea id="raw-article-text" rows="8" placeholder="Paste or type a longer article or guide. ingest wiki will treat this as a full article source rather than a quick note."></textarea>
+      <button id="raw-article-btn" class="save-btn" disabled>Submit article to wiki</button>
+
       <div class="raw-history">
         <h4>Today</h4>
         <div id="raw-today-list"></div>

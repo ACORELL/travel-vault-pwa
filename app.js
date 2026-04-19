@@ -40,7 +40,9 @@ async function init() {
     return;
   }
 
-  // Author known — check for stored vault handle
+  // Author known — hide the author overlay that is visible by default in HTML,
+  // then check for a stored vault handle.
+  hide('setup-overlay');
   let saved = null;
   try { saved = await getVaultHandle(); } catch {}
   if (saved) {
@@ -384,15 +386,27 @@ async function renderLog() {
 
 // ---- Raw tab ----
 let rawSelectedType = null;
+let rawRating = null;
 
 function setupRawTab() {
   $$('.type-chip').forEach(chip => chip.addEventListener('click', () => {
     $$('.type-chip').forEach(c => c.classList.remove('selected'));
     chip.classList.add('selected');
     rawSelectedType = chip.dataset.type;
+    $('raw-rating-section').classList.remove('hidden');
   }));
   $('raw-text').addEventListener('input', updateRawBtn);
   $('raw-save-btn').addEventListener('click', saveRaw);
+
+  $$('.rating-star').forEach(star => star.addEventListener('click', () => {
+    rawRating = parseInt(star.dataset.rating, 10);
+    $$('.rating-star').forEach(s => s.classList.toggle('active', parseInt(s.dataset.rating, 10) <= rawRating));
+  }));
+
+  $('raw-article-text').addEventListener('input', () => {
+    $('raw-article-btn').disabled = !$('raw-article-text').value.trim();
+  });
+  $('raw-article-btn').addEventListener('click', saveArticle);
 }
 
 function updateRawBtn() {
@@ -402,10 +416,14 @@ function updateRawBtn() {
 async function saveRaw() {
   const text = $('raw-text').value.trim();
   if (!text) return;
-  const ts       = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
-  const suffix   = rawSelectedType ? `_${rawSelectedType}` : '';
+  const ts      = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
+  const suffix  = rawSelectedType ? `_${rawSelectedType}` : '';
   const filename = `${TODAY}-${ts}${suffix}.md`;
-  const content  = rawSelectedType ? `type: ${rawSelectedType}\n\n${text}` : text;
+
+  const meta = [];
+  if (rawSelectedType) meta.push(`type: ${rawSelectedType}`);
+  if (rawRating)       meta.push(`rating_personal: ${rawRating}`);
+  const content = meta.length ? meta.join('\n') + '\n\n' + text : text;
 
   if (s.vault) {
     try { await vault.saveRawEntry(s.vault, filename, content); }
@@ -417,7 +435,29 @@ async function saveRaw() {
   $('raw-text').value = '';
   $$('.type-chip').forEach(c => c.classList.remove('selected'));
   rawSelectedType = null;
+  rawRating = null;
+  $$('.rating-star').forEach(s => s.classList.remove('active'));
+  $('raw-rating-section').classList.add('hidden');
   updateRawBtn();
+  await loadRawToday();
+}
+
+async function saveArticle() {
+  const text = $('raw-article-text').value.trim();
+  if (!text) return;
+  const ts       = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
+  const filename = `${TODAY}-${ts}_article.md`;
+  const content  = `source_type: article\n\n${text}`;
+
+  if (s.vault) {
+    try { await vault.saveRawEntry(s.vault, filename, content); }
+    catch { await enqueueRaw({ filename, content }); setSyncStatus('offline'); showBanner(); }
+  } else {
+    await enqueueRaw({ filename, content });
+  }
+
+  $('raw-article-text').value = '';
+  $('raw-article-btn').disabled = true;
   await loadRawToday();
 }
 
@@ -432,12 +472,15 @@ function renderRawToday() {
   const el = $('raw-today-list');
   if (!s.rawToday.length) { el.innerHTML = '<p class="empty-state" style="padding:16px 0">Nothing captured today</p>'; return; }
   el.innerHTML = s.rawToday.map(({ content }) => {
-    const typeM   = content.match(/^type:\s*(\w+)/);
-    const type    = typeM ? typeM[1] : '';
-    const preview = content.replace(/^type:\s*\w+\n+/, '').slice(0, 100);
+    const typeM    = content.match(/^type:\s*(\w+)/m);
+    const srcM     = content.match(/^source_type:\s*(\w+)/m);
+    const ratingM  = content.match(/^rating_personal:\s*(\d)/m);
+    const label    = typeM ? typeM[1] : (srcM ? srcM[1] : '');
+    const preview  = content.replace(/^(?:\w[\w_]*:[^\n]*\n)+\n?/, '').slice(0, 100);
+    const ratingHtml = ratingM ? `<span class="raw-rating">${'★'.repeat(+ratingM[1])}</span>` : '';
     return `<div class="raw-item">
       <div>${esc(preview)}</div>
-      ${type ? `<div class="raw-type">${type}</div>` : ''}
+      <div class="raw-item-meta">${label ? `<div class="raw-type">${label}</div>` : ''}${ratingHtml}</div>
     </div>`;
   }).join('');
 }

@@ -1,5 +1,18 @@
 'use strict';
-const CACHE = 'tv-phone-v8';
+// ─── CACHE VERSION ───────────────────────────────────────────────────────────
+// Bump CACHE on every push. If you forget, phones running the old SW will
+// continue to serve stale files — the new code will never reach them.
+// Format: tv-phone-vN  (N is a plain incrementing integer, never reset)
+// After bumping: git commit, push, done. The SW activate handler cleans up
+// all old cache entries automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+const CACHE = 'tv-phone-v9';
+
+// DEV_MODE: set true to bypass the SW cache entirely while iterating locally.
+// Every request goes straight to the network — no manual cache-clear needed.
+// IMPORTANT: must be false before pushing to production.
+const DEV_MODE = false;
+
 const SHELL = ['./', './index.html', './app.js', './db.js', './vault.js', './exif.js', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -19,5 +32,6 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   if (new URL(e.request.url).origin !== self.location.origin) return;
+  if (DEV_MODE) return; // bypass cache — all requests go to network
   e.respondWith(caches.match(e.request).then(cached => cached || fetch(e.request)));
 });
