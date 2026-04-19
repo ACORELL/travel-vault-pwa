@@ -185,7 +185,16 @@ async function onPhotoSelected(e) {
   e.target.value = '';
 
   const ts = await extractTimestamp(file) || nowHHMMSS();
-  s.pendingPhoto = { file, ts };
+  s.pendingPhoto = { file, ts, gps: null };
+
+  // Request location in background — ready by the time user finishes typing comment
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => { if (s.pendingPhoto) s.pendingPhoto.gps = { lat: pos.coords.latitude, lon: pos.coords.longitude }; },
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    );
+  }
 
   const prev = $('photo-preview');
   prev.src = URL.createObjectURL(file);
@@ -213,7 +222,7 @@ async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
   if (!comment || !s.pendingPhoto) return;
 
-  const { file, ts } = s.pendingPhoto;
+  const { file, ts, gps } = s.pendingPhoto;
   s.pendingPhoto = null;
   cancelPhotoForm(); // resets UI
 
@@ -222,7 +231,8 @@ async function submitPhoto() {
   const base    = `${hms}_${s.author}`;
   const name    = await resolvePhotoName(base, ext);
   const time    = ts.slice(0, 5);
-  const line    = `${time} | ${s.author} | 📷 ${name} | "${comment}"`;
+  const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
+  const line    = `${time} | ${s.author} | 📷 ${name} | "${comment}"${gpsPart}`;
 
   if (s.vault) {
     try {
