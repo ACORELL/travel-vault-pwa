@@ -18,7 +18,11 @@ const s = {
 
 // ---- Boot ----
 async function init() {
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    // When a new SW takes control, reload so all files come from the same cache version
+    navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  }
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 
   // Step 1: author selection
@@ -29,7 +33,8 @@ async function init() {
       localStorage.setItem('tv-author', s.author);
       hide('setup-overlay');
       // Step 2: vault folder — only needed once
-      const saved = await getVaultHandle();
+      let saved = null;
+      try { saved = await getVaultHandle(); } catch {}
       if (saved) { show('app'); startApp(saved); }
       else        { show('vault-setup-overlay'); }
     }));
@@ -37,14 +42,24 @@ async function init() {
   }
 
   // Author known — check for stored vault handle
-  const saved = await getVaultHandle();
+  let saved = null;
+  try { saved = await getVaultHandle(); } catch {}
   if (saved) {
     show('app');
     startApp(saved);
   } else {
-    // No handle yet — shouldn't happen after first launch, but handle gracefully
     show('vault-setup-overlay');
   }
+}
+
+async function resetApp() {
+  localStorage.clear();
+  try { indexedDB.deleteDatabase('travel-vault'); } catch {}
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations().catch(() => []);
+    await Promise.all(regs.map(r => r.unregister()));
+  }
+  window.location.reload();
 }
 
 // First-time vault folder selection
@@ -487,5 +502,8 @@ function $(id)       { return document.getElementById(id); }
 function $$(sel)     { return document.querySelectorAll(sel); }
 function show(id)    { $(id).classList.remove('hidden'); }
 function hide(id)    { $(id).classList.add('hidden'); }
+
+$('reset-btn-1').addEventListener('click', resetApp);
+$('reset-btn-2').addEventListener('click', resetApp);
 
 init();
