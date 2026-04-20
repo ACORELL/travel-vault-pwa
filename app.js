@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=16').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=17').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -674,6 +674,7 @@ async function loadTodaySourceFile(foldEl) {
 }
 
 const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas' };
+const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area'];
 
 function renderWikiList(query) {
   const el = $('wiki-list');
@@ -689,21 +690,51 @@ function renderWikiList(query) {
   const grouped = {};
   for (const p of pages) { if (!grouped[p.type]) grouped[p.type] = []; grouped[p.type].push(p); }
 
-  el.innerHTML = Object.entries(grouped).map(([type, items]) => `
-    <div class="wiki-section">
-      <h4>${TYPE_LABEL[type] || type}</h4>
-      ${items.map(p => `
-        <div class="wiki-item" data-slug="${p.slug}" data-type="${p.type}">
-          <div>
-            <div class="wiki-name">${esc(p.name)}</div>
-            ${p.area ? `<div class="wiki-area">${esc(p.area)}</div>` : ''}
-          </div>
-          ${p.rating ? `<span class="wiki-rating">${'★'.repeat(+p.rating)}</span>` : ''}
-        </div>`).join('')}
-    </div>`).join('');
+  el.innerHTML = TYPE_ORDER
+    .filter(type => grouped[type])
+    .map(type => {
+      const items = grouped[type];
+      return `<div class="wiki-accordion-section">` +
+        `<button class="wiki-accordion-header" data-type="${type}">` +
+          `<span>${esc(TYPE_LABEL[type] || type)}</span>` +
+          `<span class="wiki-accordion-arrow">›</span>` +
+        `</button>` +
+        `<div class="wiki-accordion-body">` +
+          items.map(p =>
+            `<div class="wiki-item" data-slug="${esc(p.slug)}" data-type="${esc(p.type)}">` +
+              `<div>` +
+                `<div class="wiki-name">${esc(p.name)}</div>` +
+                (p.area ? `<div class="wiki-area">${esc(p.area)}</div>` : '') +
+              `</div>` +
+              (p.rating ? `<span class="wiki-rating">${'★'.repeat(+p.rating)}</span>` : '') +
+            `</div>`
+          ).join('') +
+        `</div>` +
+      `</div>`;
+    }).join('');
 
-  el.querySelectorAll('.wiki-item').forEach(el => el.addEventListener('click', () => {
-    const page = s.wikiPages.find(p => p.slug === el.dataset.slug && p.type === el.dataset.type);
+  // When searching, expand all matching sections so results are immediately visible
+  if (query) {
+    el.querySelectorAll('.wiki-accordion-header').forEach(h => h.classList.add('open'));
+    el.querySelectorAll('.wiki-accordion-body').forEach(b => b.classList.add('open'));
+  }
+
+  // Accordion toggle — one section open at a time
+  el.querySelectorAll('.wiki-accordion-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const body = header.nextElementSibling;
+      const opening = !body.classList.contains('open');
+      el.querySelectorAll('.wiki-accordion-header').forEach(h => h.classList.remove('open'));
+      el.querySelectorAll('.wiki-accordion-body').forEach(b => b.classList.remove('open'));
+      if (opening) {
+        header.classList.add('open');
+        body.classList.add('open');
+      }
+    });
+  });
+
+  el.querySelectorAll('.wiki-item').forEach(item => item.addEventListener('click', () => {
+    const page = s.wikiPages.find(p => p.slug === item.dataset.slug && p.type === item.dataset.type);
     if (page) openArticle(page);
   }));
 }
