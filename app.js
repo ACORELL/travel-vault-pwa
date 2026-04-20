@@ -535,8 +535,128 @@ function setupWikiTab() {
 
 async function loadWiki() {
   if (!s.vault) return;
-  try { s.wikiPages = await vault.loadWikiPages(s.vault); renderWikiList(''); }
-  catch {}
+  try {
+    s.wikiPages = await vault.loadWikiPages(s.vault);
+    renderTodayStrip();
+    renderWikiList('');
+  } catch {}
+}
+
+const TRANSPORT_EMOJI = { flight: '✈️', train: '🚆', bus: '🚌', ferry: '⛴️', other: '🎫' };
+
+function formatTodayLine(p) {
+  if (p.type === 'hotel') {
+    const bkfast = p.breakfast_included
+      ? (p.breakfast_time ? `breakfast ${p.breakfast_time}` : 'breakfast included')
+      : 'breakfast none';
+    return `🏨 ${esc(p.name)} · check-in ${p.check_in_time || '—'} · check-out ${p.check_out_time || '—'} · ${bkfast}`;
+  }
+  if (p.type === 'transport') {
+    const emoji = TRANSPORT_EMOJI[p.subtype] || '🎫';
+    if (p.subtype === 'flight') {
+      return `${emoji} ${esc(p.name)} · departs ${p.departure_time || '—'} ${esc(p.departure_point || '')} · arrives ${p.arrival_time || '—'}`;
+    }
+    return `${emoji} ${esc(p.name)} · ${esc(p.departure_point || '—')} ${p.departure_time || '—'} · ${esc(p.arrival_point || '—')} ${p.arrival_time || '—'}`;
+  }
+  if (p.type === 'activity') {
+    const parts = [`🎟️ ${esc(p.name)}`];
+    if (p.reservation_time) parts.push(p.reservation_time);
+    if (p.meeting_point) parts.push(esc(p.meeting_point));
+    return parts.join(' · ');
+  }
+  return esc(p.name);
+}
+
+function buildFoldHtml(p, idx) {
+  const rows = [];
+  if (p.type === 'hotel' && p.laundry) {
+    rows.push(`<div class="today-fold-row">🧺 ${esc(p.laundry)}</div>`);
+  }
+  if (p.type === 'hotel' && p.room_service_url) {
+    rows.push(`<div class="today-fold-row"><a href="${esc(p.room_service_url)}" target="_blank" rel="noopener">Room service menu</a></div>`);
+  }
+  if (p.type === 'activity' && p.details_url) {
+    rows.push(`<div class="today-fold-row"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details</a></div>`);
+  }
+  if (p.special_notes) {
+    rows.push(`<div class="today-fold-row">📝 ${esc(p.special_notes)}</div>`);
+  }
+  if (p.reservation_items && p.reservation_items.length) {
+    const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
+    rows.push(`<div class="today-fold-row"><ol class="today-fold-list">${items}</ol></div>`);
+  }
+  if (p.source) {
+    rows.push(`<div class="today-fold-row today-source-row" style="display:none" data-source="${esc(p.source)}">
+      <span class="today-source-label">Original capture →</span>
+      <div class="today-source-content"></div>
+    </div>`);
+  }
+  return rows.join('');
+}
+
+function renderTodayStrip() {
+  const strip = $('today-strip');
+  const items = s.wikiPages.filter(p => {
+    if (p.type === 'hotel' && p.check_in_date && p.check_out_date) {
+      return p.check_in_date <= TODAY && TODAY <= p.check_out_date;
+    }
+    if (p.type === 'transport' && p.date) return p.date === TODAY;
+    if (p.type === 'activity' && p.reservation_date) return p.reservation_date === TODAY;
+    return false;
+  });
+
+  function primaryTime(p) {
+    if (p.type === 'hotel')     return p.check_in_time  || '00:00';
+    if (p.type === 'transport') return p.departure_time || '00:00';
+    if (p.type === 'activity')  return p.reservation_time || '00:00';
+    return '00:00';
+  }
+  items.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
+
+  if (!items.length) { strip.innerHTML = ''; return; }
+
+  strip.innerHTML = '<div class="today-strip-heading">Today</div>' +
+    items.map((p, i) => {
+      const foldHtml = buildFoldHtml(p, i);
+      const hasArrow = !!foldHtml;
+      return `<div class="today-item">
+        <div class="today-item-row" data-idx="${i}">
+          <span class="today-item-line">${formatTodayLine(p)}</span>
+          ${hasArrow ? '<span class="today-item-arrow">›</span>' : ''}
+        </div>
+        ${foldHtml ? `<div class="today-fold" data-idx="${i}">${foldHtml}</div>` : ''}
+      </div>`;
+    }).join('');
+
+  strip.querySelectorAll('.today-item-row[data-idx]').forEach(row => {
+    row.addEventListener('click', () => {
+      const idx = row.dataset.idx;
+      const fold = strip.querySelector(`.today-fold[data-idx="${idx}"]`);
+      if (!fold) return;
+      const opening = !fold.classList.contains('open');
+      fold.classList.toggle('open', opening);
+      const arrow = row.querySelector('.today-item-arrow');
+      if (arrow) arrow.textContent = opening ? '∨' : '›';
+      if (opening) loadTodaySourceFile(fold);
+    });
+  });
+}
+
+async function loadTodaySourceFile(foldEl) {
+  if (!s.vault) return;
+  const sourceRow = foldEl.querySelector('.today-source-row');
+  if (!sourceRow || sourceRow.dataset.loaded) return;
+  const sourcePath = sourceRow.dataset.source;
+  if (!sourcePath) return;
+
+  try {
+    const text = await vault.readSourceFile(s.vault, sourcePath);
+    if (text !== null) {
+      sourceRow.querySelector('.today-source-content').textContent = text;
+      sourceRow.style.display = '';
+    }
+  } catch { /* omit if unreadable */ }
+  sourceRow.dataset.loaded = '1';
 }
 
 const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas' };

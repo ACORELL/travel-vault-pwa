@@ -1,6 +1,6 @@
 // File System Access API — all vault read/write operations.
 // The vault folder lives on the phone's local storage.
-// Syncthing handles cross-device sync independently.
+// Obsidian Sync handles cross-device sync independently.
 
 export async function pickVaultFolder() {
   if (!window.showDirectoryPicker) {
@@ -79,7 +79,7 @@ export async function appendLogLines(vault, date, lines) {
 }
 
 // ---- Conflict detection ----
-// Syncthing names conflict files: filename.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.ext
+// Obsidian Sync names conflict files: filename.sync-conflict-YYYYMMDD-HHMMSS.ext
 
 export async function detectConflicts(vault, date) {
   const found = [];
@@ -110,6 +110,19 @@ export async function getPhotoUrl(vault, date, filename) {
   try {
     const fh = await (await dir(vault, 'days', date, 'photos')).getFileHandle(filename);
     return URL.createObjectURL(await fh.getFile());
+  } catch { return null; }
+}
+
+// ---- Source file reader ----
+
+// sourcePath: relative vault path, e.g. "wiki/history/2026-06-01_hotel.md"
+export async function readSourceFile(vault, sourcePath) {
+  try {
+    const parts = sourcePath.split('/').filter(Boolean);
+    let d = vault;
+    for (const part of parts.slice(0, -1)) d = await d.getDirectoryHandle(part);
+    const fh = await d.getFileHandle(parts[parts.length - 1]);
+    return await (await fh.getFile()).text();
   } catch { return null; }
 }
 
@@ -170,21 +183,82 @@ export async function loadWikiPages(vault) {
   return pages;
 }
 
+function parseFrontmatter(yamlText) {
+  const fm = {};
+  const lines = yamlText.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Skip indented lines (nested keys); list items consumed below
+    if (!line || /^\s/.test(line)) { i++; continue; }
+    const colon = line.indexOf(':');
+    if (colon < 0) { i++; continue; }
+    const key = line.slice(0, colon).trim();
+    const rest = line.slice(colon + 1).trim();
+    i++;
+    if (rest === '' || rest === 'null' || rest === '~') {
+      // Collect block list items
+      const items = [];
+      while (i < lines.length && /^  - /.test(lines[i])) {
+        items.push(lines[i].replace(/^  - /, '').replace(/^['"]|['"]$/g, '').trim());
+        i++;
+      }
+      fm[key] = items.length > 0 ? items : null;
+    } else if (rest === '[]') {
+      fm[key] = [];
+    } else if (rest === 'true') {
+      fm[key] = true;
+    } else if (rest === 'false') {
+      fm[key] = false;
+    } else if (rest.startsWith('[') && rest.endsWith(']')) {
+      // Inline list: [tag1, tag2]
+      const inner = rest.slice(1, -1).trim();
+      fm[key] = inner ? inner.split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean) : [];
+    } else {
+      fm[key] = rest.replace(/^['"]|['"]$/g, '');
+    }
+  }
+  return fm;
+}
+
 function parsePage(text, type, slug) {
   const m = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) return null;
-  const fm = {};
-  for (const line of m[1].split('\n')) {
-    const colon = line.indexOf(':');
-    if (colon < 0) continue;
-    fm[line.slice(0, colon).trim()] = line.slice(colon + 1).trim().replace(/^['"]|['"]$/g, '');
-  }
+  const fm = parseFrontmatter(m[1]);
+  const tags = Array.isArray(fm.tags)
+    ? fm.tags
+    : (typeof fm.tags === 'string' ? fm.tags.replace(/[\[\]]/g, '').split(',').map(t => t.trim()).filter(Boolean) : []);
   return {
     type, slug,
     name:   fm.name || slug,
     area:   fm.area || '',
     rating: fm.rating_personal || null,
-    tags:   (fm.tags || '').replace(/[\[\]]/g, '').split(',').map(t => t.trim()).filter(Boolean),
+    tags,
     content: m[2].trim(),
+    // Hotel fields
+    check_in_date:    fm.check_in_date  || null,
+    check_out_date:   fm.check_out_date || null,
+    check_in_time:    fm.check_in_time  || null,
+    check_out_time:   fm.check_out_time || null,
+    breakfast_included: fm.breakfast_included === true,
+    breakfast_time:   fm.breakfast_time  || null,
+    laundry:          fm.laundry         || null,
+    room_service_url: fm.room_service_url || null,
+    // Transport fields
+    subtype:          fm.subtype          || null,
+    date:             fm.date             || null,
+    departure_time:   fm.departure_time   || null,
+    departure_point:  fm.departure_point  || null,
+    arrival_time:     fm.arrival_time     || null,
+    arrival_point:    fm.arrival_point    || null,
+    // Activity fields
+    reservation_date: fm.reservation_date || null,
+    reservation_time: fm.reservation_time || null,
+    meeting_point:    fm.meeting_point    || null,
+    details_url:      fm.details_url      || null,
+    // Shared enriched fields
+    special_notes:    fm.special_notes    || null,
+    reservation_items: Array.isArray(fm.reservation_items) ? fm.reservation_items : [],
+    source:           fm.source           || null,
   };
 }

@@ -137,6 +137,24 @@
     /* ---- Wiki tab ---- */
     .wiki-search { width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: var(--surface); margin-bottom: 16px; -webkit-appearance: none; }
     .wiki-search:focus { outline: none; border-color: #1a1a1a; background: #fff; }
+
+    /* ---- Today strip ---- */
+    #today-strip:not(:empty) { margin-bottom: 14px; }
+    .today-strip-heading { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+    .today-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+    .today-item-row { padding: 10px 12px; font-size: 13px; line-height: 1.4; cursor: pointer; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .today-item-row:active { background: var(--surface); }
+    .today-item-line { flex: 1; }
+    .today-item-arrow { font-size: 14px; color: var(--muted); flex-shrink: 0; margin-top: 1px; }
+    .today-fold { display: none; padding: 10px 12px; font-size: 13px; color: #333; border-top: 1px solid var(--border); }
+    .today-fold.open { display: block; }
+    .today-fold-row { margin-top: 6px; line-height: 1.5; }
+    .today-fold-row:first-child { margin-top: 0; }
+    .today-fold-row a { color: #1565c0; text-decoration: none; }
+    .today-fold-list { padding-left: 18px; list-style: decimal; margin-top: 2px; }
+    .today-fold-list li { margin-top: 3px; }
+    .today-source-label { font-size: 12px; color: var(--muted); font-weight: 500; display: block; margin-bottom: 4px; }
+    .today-source-content { background: var(--surface); border-radius: 6px; padding: 8px; font-size: 12px; font-family: 'Courier New', monospace; white-space: pre-wrap; overflow-x: auto; max-height: 200px; overflow-y: auto; }
     .wiki-section { margin-bottom: 12px; }
     .wiki-section h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; margin-bottom: 6px; }
     .wiki-item { padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
@@ -227,6 +245,7 @@
 
     <!-- Wiki tab -->
     <div id="tab-wiki" class="tab-panel">
+      <div id="today-strip"></div>
       <input id="wiki-search" class="wiki-search" type="text" placeholder="Search places…">
       <div id="wiki-list"></div>
     </div>
