@@ -264,7 +264,7 @@ function parsePage(text, type, slug) {
     // Shared enriched fields
     special_notes:    fm.special_notes    || null,
     reservation_items: Array.isArray(fm.reservation_items) ? fm.reservation_items : [],
-    sources: Array.isArray(fm.sources) ? fm.sources : (fm.sources ? [fm.sources] : []),
+    sources: Array.isArray(fm.sources) ? fm.sources : (fm.sources ? [fm.sources] : (fm.source ? [fm.source] : [])),
     lat, lon,
   };
 }

@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=15').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=16').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -591,10 +591,11 @@ function buildFoldHtml(p, idx) {
   }
   if (p.sources && p.sources.length) {
     p.sources.forEach(src => {
-      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">
-        <span class="today-source-label">Original capture →</span>
-        <div class="today-source-content" style="display:none"></div>
-      </div>`);
+      const filename = src.split('/').pop();
+      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+        `<span class="today-source-label">${esc(filename)}</span>` +
+        `<div class="today-source-content" style="display:none"></div>` +
+        `</div>`);
     });
   }
   return rows.join('');
