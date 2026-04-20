@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=14').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=15').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -589,11 +589,13 @@ function buildFoldHtml(p, idx) {
     const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
     rows.push(`<div class="today-fold-row"><ol class="today-fold-list">${items}</ol></div>`);
   }
-  if (p.source) {
-    rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(p.source)}">
-      <span class="today-source-label">Original capture →</span>
-      <div class="today-source-content" style="display:none"></div>
-    </div>`);
+  if (p.sources && p.sources.length) {
+    p.sources.forEach(src => {
+      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">
+        <span class="today-source-label">Original capture →</span>
+        <div class="today-source-content" style="display:none"></div>
+      </div>`);
+    });
   }
   return rows.join('');
 }
@@ -648,20 +650,26 @@ function renderTodayStrip() {
 
 async function loadTodaySourceFile(foldEl) {
   if (!s.vault) return;
-  const sourceRow = foldEl.querySelector('.today-source-row');
-  if (!sourceRow || sourceRow.dataset.loaded) return;
-  const sourcePath = sourceRow.dataset.source;
-  if (!sourcePath) return;
-
-  try {
-    const text = await vault.readSourceFile(s.vault, sourcePath);
-    if (text !== null) {
-      const contentEl = sourceRow.querySelector('.today-source-content');
-      contentEl.textContent = text;
-      contentEl.style.display = '';
+  const sourceRows = foldEl.querySelectorAll('.today-source-row');
+  for (const sourceRow of sourceRows) {
+    if (sourceRow.dataset.loaded) continue;
+    const sourcePath = sourceRow.dataset.source;
+    if (!sourcePath) continue;
+    const label = sourceRow.querySelector('.today-source-label');
+    const contentEl = sourceRow.querySelector('.today-source-content');
+    try {
+      const text = await vault.readSourceFile(s.vault, sourcePath);
+      if (text !== null) {
+        contentEl.textContent = text;
+        contentEl.style.display = '';
+      } else {
+        label.textContent = 'Original capture (unavailable)';
+      }
+    } catch {
+      label.textContent = 'Original capture (unavailable)';
     }
-  } catch { /* omit content if unreadable */ }
-  sourceRow.dataset.loaded = '1';
+    sourceRow.dataset.loaded = '1';
+  }
 }
 
 const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas' };
