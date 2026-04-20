@@ -29,9 +29,14 @@ async function init() {
     // When a new SW takes control, reload so all files come from the same cache version
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
-  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+  if (navigator.storage?.persist) {
+    navigator.storage.persist().then(granted => {
+      console.log('[TV] storage.persist granted:', granted);
+      if (!granted) console.warn('[TV] IndexedDB may be evicted under storage pressure — vault handle could be lost on cold start.');
+    }).catch(() => {});
+  }
 
-  // Step 1: author selection
+  // Step 1: author selection — first launch only
   if (!s.author) {
     show('setup-overlay');
     $$('.author-btn').forEach(btn => btn.addEventListener('click', async () => {
@@ -47,8 +52,7 @@ async function init() {
     return;
   }
 
-  // Author known — hide the author overlay that is visible by default in HTML,
-  // then check for a stored vault handle.
+  // Author known — ensure overlay is hidden, check for a stored vault handle.
   hide('setup-overlay');
   let saved = null;
   try { saved = await getVaultHandle(); } catch {}
@@ -386,9 +390,9 @@ async function renderLog() {
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
         : '<span class="checkin-no-gps">Location unavailable</span>';
-      li.innerHTML = `${timeEl}<div class="entry-body">
+      li.innerHTML = `${timeEl}${badgeHtml}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
-      </div>${badgeHtml}`;
+      </div>`;
     } else {
       li.className = 'log-entry';
       if (groupAuthor) {
@@ -401,12 +405,12 @@ async function renderLog() {
           const url = await vault.getPhotoUrl(s.vault, s.viewedDate, entry.photo);
           if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
         }
-        li.innerHTML = `${timeEl}<div class="entry-body">
+        li.innerHTML = `${timeEl}${badgeHtml}<div class="entry-body">
           <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
           <p class="entry-comment">${esc(entry.comment)}</p>
-        </div>${badgeHtml}`;
+        </div>`;
       } else {
-        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>${badgeHtml}`;
+        li.innerHTML = `${timeEl}${badgeHtml}<div class="entry-body">${esc(entry.text)}</div>`;
       }
     }
     list.appendChild(li);
@@ -469,27 +473,15 @@ function updateActionBarState() {
 
 // ---- Raw tab ----
 let rawSelectedType = null;
-let rawRating = null;
 
 function setupRawTab() {
   $$('.type-chip').forEach(chip => chip.addEventListener('click', () => {
     $$('.type-chip').forEach(c => c.classList.remove('selected'));
     chip.classList.add('selected');
     rawSelectedType = chip.dataset.type;
-    $('raw-rating-section').classList.remove('hidden');
   }));
   $('raw-text').addEventListener('input', updateRawBtn);
   $('raw-save-btn').addEventListener('click', saveRaw);
-
-  $$('.rating-star').forEach(star => star.addEventListener('click', () => {
-    rawRating = parseInt(star.dataset.rating, 10);
-    $$('.rating-star').forEach(s => s.classList.toggle('active', parseInt(s.dataset.rating, 10) <= rawRating));
-  }));
-
-  $('raw-article-text').addEventListener('input', () => {
-    $('raw-article-btn').disabled = !$('raw-article-text').value.trim();
-  });
-  $('raw-article-btn').addEventListener('click', saveArticle);
 }
 
 function updateRawBtn() {
@@ -503,10 +495,7 @@ async function saveRaw() {
   const suffix  = rawSelectedType ? `_${rawSelectedType}` : '';
   const filename = `${TODAY}-${ts}${suffix}.md`;
 
-  const meta = [];
-  if (rawSelectedType) meta.push(`type: ${rawSelectedType}`);
-  if (rawRating)       meta.push(`rating_personal: ${rawRating}`);
-  const content = meta.length ? meta.join('\n') + '\n\n' + text : text;
+  const content = rawSelectedType ? `type: ${rawSelectedType}\n\n${text}` : text;
 
   if (s.vault) {
     try { await vault.saveRawEntry(s.vault, filename, content); }
@@ -518,31 +507,10 @@ async function saveRaw() {
   $('raw-text').value = '';
   $$('.type-chip').forEach(c => c.classList.remove('selected'));
   rawSelectedType = null;
-  rawRating = null;
-  $$('.rating-star').forEach(s => s.classList.remove('active'));
-  $('raw-rating-section').classList.add('hidden');
   updateRawBtn();
   await loadRawToday();
 }
 
-async function saveArticle() {
-  const text = $('raw-article-text').value.trim();
-  if (!text) return;
-  const ts       = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
-  const filename = `${TODAY}-${ts}_article.md`;
-  const content  = `source_type: article\n\n${text}`;
-
-  if (s.vault) {
-    try { await vault.saveRawEntry(s.vault, filename, content); }
-    catch { await enqueueRaw({ filename, content }); setSyncStatus('offline'); showBanner(); }
-  } else {
-    await enqueueRaw({ filename, content });
-  }
-
-  $('raw-article-text').value = '';
-  $('raw-article-btn').disabled = true;
-  await loadRawToday();
-}
 
 async function loadRawToday() {
   if (!s.vault) return;
