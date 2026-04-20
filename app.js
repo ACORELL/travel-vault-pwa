@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=14').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -578,6 +578,10 @@ function buildFoldHtml(p, idx) {
   if (p.type === 'activity' && p.details_url) {
     rows.push(`<div class="today-fold-row"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details</a></div>`);
   }
+  if (p.lat !== null && p.lat !== undefined && p.lon !== null && p.lon !== undefined) {
+    const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
+    rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
+  }
   if (p.special_notes) {
     rows.push(`<div class="today-fold-row">📝 ${esc(p.special_notes)}</div>`);
   }
@@ -586,9 +590,9 @@ function buildFoldHtml(p, idx) {
     rows.push(`<div class="today-fold-row"><ol class="today-fold-list">${items}</ol></div>`);
   }
   if (p.source) {
-    rows.push(`<div class="today-fold-row today-source-row" style="display:none" data-source="${esc(p.source)}">
+    rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(p.source)}">
       <span class="today-source-label">Original capture →</span>
-      <div class="today-source-content"></div>
+      <div class="today-source-content" style="display:none"></div>
     </div>`);
   }
   return rows.join('');
@@ -652,10 +656,11 @@ async function loadTodaySourceFile(foldEl) {
   try {
     const text = await vault.readSourceFile(s.vault, sourcePath);
     if (text !== null) {
-      sourceRow.querySelector('.today-source-content').textContent = text;
-      sourceRow.style.display = '';
+      const contentEl = sourceRow.querySelector('.today-source-content');
+      contentEl.textContent = text;
+      contentEl.style.display = '';
     }
-  } catch { /* omit if unreadable */ }
+  } catch { /* omit content if unreadable */ }
   sourceRow.dataset.loaded = '1';
 }
 

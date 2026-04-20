@@ -228,6 +228,11 @@ function parsePage(text, type, slug) {
   const tags = Array.isArray(fm.tags)
     ? fm.tags
     : (typeof fm.tags === 'string' ? fm.tags.replace(/[\[\]]/g, '').split(',').map(t => t.trim()).filter(Boolean) : []);
+  // parseFrontmatter can't handle nested YAML objects; parse coords via regex
+  const latM = m[1].match(/^\s+lat:\s*(-?[\d.]+)/m);
+  const lonM = m[1].match(/^\s+lon:\s*(-?[\d.]+)/m);
+  const lat = latM ? parseFloat(latM[1]) : null;
+  const lon = lonM ? parseFloat(lonM[1]) : null;
   return {
     type, slug,
     name:   fm.name || slug,
@@ -260,5 +265,6 @@ function parsePage(text, type, slug) {
     special_notes:    fm.special_notes    || null,
     reservation_items: Array.isArray(fm.reservation_items) ? fm.reservation_items : [],
     source:           fm.source           || null,
+    lat, lon,
   };
 }
