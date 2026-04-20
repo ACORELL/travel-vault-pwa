@@ -69,7 +69,7 @@
       height: calc(var(--nav) + env(safe-area-inset-bottom));
       padding-bottom: env(safe-area-inset-bottom);
       background: #fff; border-top: 1px solid var(--border);
-      display: grid; grid-template-columns: repeat(3, 1fr);
+      display: grid; grid-template-columns: repeat(2, 1fr);
       flex-shrink: 0;
     }
     .tab-btn { background: none; border: none; font-size: 11px; font-weight: 500; color: var(--muted); cursor: pointer; padding: 8px 0 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
@@ -95,6 +95,13 @@
     .add-bar #btn-checkin { border-color: #166534; color: #166534; }
     .add-bar #btn-checkin:disabled { border-color: var(--border); color: var(--muted); opacity: 1; }
     .add-bar-hint { font-size: 12px; color: var(--muted); text-align: center; padding: 5px 0 2px; margin: 0; display: none; }
+
+    /* ---- Pending draft ---- */
+    #pending-draft { padding: 10px 0 2px; }
+    .pending-msg { font-size: 13px; color: #92400e; font-weight: 500; margin-bottom: 4px; }
+    .pending-preview { font-size: 12px; color: var(--muted); font-style: italic; margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #btn-pending-checkin { width: 100%; padding: 11px; border: 1.5px solid #166534; border-radius: 8px; background: none; font-size: 14px; font-family: inherit; cursor: pointer; font-weight: 500; color: #166534; }
+    #btn-pending-checkin:disabled { opacity: 0.45; cursor: default; }
 
     .author-badge { flex-shrink: 0; align-self: flex-start; margin-top: 1px; width: 20px; height: 20px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 
@@ -126,19 +133,6 @@
     textarea { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; resize: none; background: #fff; -webkit-appearance: none; }
     textarea:focus { outline: none; border-color: #1a1a1a; }
     .field-hint { font-size: 12px; color: var(--muted); }
-
-    /* ---- Raw tab ---- */
-    .type-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .type-chip { padding: 6px 13px; border: 1.5px solid var(--border); border-radius: 20px; font-size: 13px; background: none; cursor: pointer; font-family: inherit; }
-    .type-chip.selected { border-color: #1a1a1a; background: #1a1a1a; color: #fff; }
-    .save-btn { width: 100%; margin-top: 12px; padding: 13px; font-size: 15px; font-weight: 600; background: #1a1a1a; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; }
-    .save-btn:disabled { background: var(--border); color: var(--muted); }
-    .raw-history { margin-top: 24px; }
-    .raw-history h4 { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; }
-    .raw-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 1.4; }
-    .raw-item-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
-    .raw-type { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-    .raw-rating { font-size: 12px; color: #f59e0b; }
 
     /* ---- Wiki tab ---- */
     .wiki-search { width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: var(--surface); margin-bottom: 16px; -webkit-appearance: none; }
@@ -217,30 +211,17 @@
       </div>
       <ul id="log-list"></ul>
       <div class="add-bar-wrap">
-        <div class="add-bar">
+        <div id="add-bar" class="add-bar">
           <button id="btn-checkin">📍 Check in</button>
           <button id="btn-add-note" disabled>+ Note</button>
           <button id="btn-add-photo" disabled>+ Photo</button>
         </div>
         <p id="add-bar-hint" class="add-bar-hint">Check in first to add notes and photos</p>
-      </div>
-    </div>
-
-    <!-- Raw tab -->
-    <div id="tab-raw" class="tab-panel">
-      <textarea id="raw-text" rows="5" placeholder="Describe the place…"></textarea>
-      <div class="type-chips" id="type-select">
-        <button class="type-chip" data-type="restaurant">Restaurant</button>
-        <button class="type-chip" data-type="hotel">Hotel</button>
-        <button class="type-chip" data-type="activity">Activity</button>
-        <button class="type-chip" data-type="transport">Transport</button>
-        <button class="type-chip" data-type="area">Area</button>
-      </div>
-      <button id="raw-save-btn" class="save-btn" disabled>Save to Wiki Raw</button>
-
-      <div class="raw-history">
-        <h4>Today</h4>
-        <div id="raw-today-list"></div>
+        <div id="pending-draft" style="display:none">
+          <p class="pending-msg">You seem to be somewhere new — check in here first.</p>
+          <p id="pending-preview" class="pending-preview"></p>
+          <button id="btn-pending-checkin">📍 Check in here</button>
+        </div>
       </div>
     </div>
 
@@ -255,10 +236,6 @@
     <button class="tab-btn active" data-tab="log">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/></svg>
       Log
-    </button>
-    <button class="tab-btn" data-tab="raw">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
-      Raw
     </button>
     <button class="tab-btn" data-tab="wiki">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>

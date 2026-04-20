@@ -1,8 +1,10 @@
-import { saveVaultHandle, getVaultHandle, enqueueLogEntry, enqueueRaw, getLogQueue, getRawQueue, clearLogKeys, clearRawKeys } from './db.js';
+import { saveVaultHandle, getVaultHandle, enqueueLogEntry, getLogQueue, clearLogKeys } from './db.js';
 import * as vault from './vault.js';
 
 // ---- Constants ----
 const TODAY = new Date().toISOString().slice(0, 10);
+
+const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
 
 const AUTHOR_COLORS = {
   N: { base: '#f9e4ec', tint: 'rgba(249,228,236,0.35)', badge: '#c2185b' },
@@ -11,22 +13,21 @@ const AUTHOR_COLORS = {
 
 // ---- State ----
 const s = {
-  author:       localStorage.getItem('tv-author'),
-  vault:        null,
-  syncStatus:   'offline',
-  logEntries:   [],
-  wikiPages:    [],
-  rawToday:     [],
-  pendingPhoto: null,        // { file, ts }
-  viewedDate:   TODAY,       // date currently shown in the log tab
-  availableDays: [],         // sorted list of day folder names that exist in vault
+  author:        localStorage.getItem('tv-author'),
+  vault:         null,
+  syncStatus:    'offline',
+  logEntries:    [],
+  wikiPages:     [],
+  pendingPhoto:  null,   // { file, ts }
+  pendingDraft:  null,   // { type: 'note'|'photo', text?, file?, ts?, comment? }
+  viewedDate:    TODAY,
+  availableDays: [],
 };
 
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
-    // When a new SW takes control, reload so all files come from the same cache version
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -43,7 +44,6 @@ async function init() {
       s.author = btn.dataset.initial;
       localStorage.setItem('tv-author', s.author);
       hide('setup-overlay');
-      // Step 2: vault folder — only needed once
       let saved = null;
       try { saved = await getVaultHandle(); } catch {}
       if (saved) { show('app'); startApp(saved); }
@@ -98,8 +98,6 @@ async function startApp(handle) {
   $('date-label').textContent   = fmtDate(TODAY);
   $('author-label').textContent = s.author;
 
-  // Query permission — safe without a user gesture.
-  // If not granted, show banner; user taps Authorize to re-grant.
   const perm = await vault.queryPermission(handle);
   if (perm === 'granted') {
     s.vault = handle;
@@ -110,20 +108,17 @@ async function startApp(handle) {
 
   setupTabs();
   setupLogTab();
-  setupRawTab();
   setupWikiTab();
 
   await loadAvailableDays();
   await loadLog();
   if (s.vault) {
     await syncQueue();
-    await loadRawToday();
     await loadWiki();
     await checkConflicts();
   }
 }
 
-// Re-authorization — called from a button tap (user gesture required by browser)
 $('reconnect-btn').addEventListener('click', async () => {
   const handle = await getVaultHandle();
   if (!handle) return;
@@ -135,7 +130,6 @@ $('reconnect-btn').addEventListener('click', async () => {
     await syncQueue();
     await loadAvailableDays();
     await loadLog();
-    await loadRawToday();
     await loadWiki();
     await checkConflicts();
     setSyncStatus('synced');
@@ -147,15 +141,10 @@ $('conflict-dismiss').addEventListener('click', () => hideBanner('conflict-banne
 // ---- Queue flush ----
 async function syncQueue() {
   const { items: logItems, keys: logKeys } = await getLogQueue();
-  const { items: rawItems, keys: rawKeys } = await getRawQueue();
-  if (!logItems.length && !rawItems.length) return;
+  if (!logItems.length) return;
 
   setSyncStatus('syncing');
   try {
-    for (const item of rawItems) await vault.saveRawEntry(s.vault, item.filename, item.content);
-    if (rawKeys.length) await clearRawKeys(rawKeys);
-
-    // Group log lines by date, flush photos alongside
     const byDate = {};
     for (let i = 0; i < logItems.length; i++) {
       const item = logItems[i];
@@ -198,6 +187,16 @@ function setupLogTab() {
 
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
+
+  $('btn-pending-checkin').addEventListener('click', async () => {
+    $('btn-pending-checkin').disabled = true;
+    $('btn-pending-checkin').textContent = 'Getting GPS…';
+    await checkIn();
+    // checkIn() handles draft auto-submit and restores btn-pending-checkin state
+    // via hidePendingDraft(); resetting its text is harmless but good practice
+    $('btn-pending-checkin').disabled = false;
+    $('btn-pending-checkin').textContent = '📍 Check in here';
+  });
 }
 
 async function checkIn() {
@@ -220,6 +219,14 @@ async function checkIn() {
 
   const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
   await writeLogLine(`${time} | ${s.author} | 📍${gpsPart}`);
+
+  // If a draft was pending proximity check, auto-submit it now under this new check-in
+  const draft = s.pendingDraft;
+  if (draft) {
+    hidePendingDraft();         // clears s.pendingDraft, restores add-bar
+    await autoSubmitDraft(draft);
+  }
+
   await loadLog();
 
   btn.disabled = false;
@@ -229,6 +236,7 @@ async function checkIn() {
 function openNoteForm() {
   $('note-text').value = '';
   $('note-confirm').disabled = true;
+  $('note-confirm').textContent = 'Add';
   show('note-form');
   $('note-text').focus();
 }
@@ -236,6 +244,26 @@ function openNoteForm() {
 async function submitNote() {
   const text = $('note-text').value.trim();
   if (!text) return;
+
+  const btn = $('note-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+
+  const proximity = await checkProximity();
+
+  btn.textContent = 'Add';
+
+  // If the user cancelled the form while GPS was resolving, discard silently
+  if ($('note-form').classList.contains('hidden')) return;
+
+  if (proximity === 'out-of-range') {
+    hide('note-form');
+    $('note-text').value = '';
+    s.pendingDraft = { type: 'note', text };
+    showPendingDraft(text);
+    return;
+  }
+
   hide('note-form');
   $('note-text').value = '';
   await writeLogLine(`${nowHHMM()} | ${s.author} | ${text}`);
@@ -256,6 +284,7 @@ async function onPhotoSelected(e) {
   $('photo-comment').disabled = false;
   $('photo-comment').value = '';
   $('photo-confirm').disabled = true;
+  $('photo-confirm').textContent = 'Add';
   show('photo-form');
 }
 
@@ -275,10 +304,37 @@ async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
   if (!comment || !s.pendingPhoto) return;
 
-  const { file, ts } = s.pendingPhoto;
-  s.pendingPhoto = null;
-  cancelPhotoForm(); // resets UI
+  const { file, ts } = s.pendingPhoto;  // capture before any awaits
 
+  const btn = $('photo-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+
+  const proximity = await checkProximity();
+
+  btn.textContent = 'Add';
+
+  // If the user cancelled the form while GPS was resolving, discard silently
+  if ($('photo-form').classList.contains('hidden')) {
+    s.pendingPhoto = null;
+    return;
+  }
+
+  if (proximity === 'out-of-range') {
+    s.pendingPhoto = null;
+    cancelPhotoForm();
+    s.pendingDraft = { type: 'photo', file, ts, comment };
+    showPendingDraft(`📷 "${comment}"`);
+    return;
+  }
+
+  s.pendingPhoto = null;
+  cancelPhotoForm();
+  await finishPhotoWrite(file, ts, comment);
+  await loadLog();
+}
+
+async function finishPhotoWrite(file, ts, comment) {
   const hms  = ts.replace(/:/g, '-');
   const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const base = `${hms}_${s.author}`;
@@ -298,7 +354,6 @@ async function submitPhoto() {
   } else {
     await enqueueLogEntry({ date: TODAY, line, photoFile: file, photoName: name });
   }
-  await loadLog();
 }
 
 async function resolvePhotoName(base, ext) {
@@ -326,7 +381,6 @@ async function loadLog() {
     } catch {}
   }
 
-  // Merge queued entries for the viewed date
   const { items } = await getLogQueue();
   for (const item of items) {
     if (item.date === s.viewedDate) {
@@ -381,19 +435,21 @@ async function renderLog() {
     const li = document.createElement('li');
     const timeEl = `<span class="entry-time">${entry.time}</span>`;
     const ec = AUTHOR_COLORS[entry.author] || { base: '#f5f5f5', tint: 'rgba(245,245,245,0.35)', badge: '#999' };
-    const badgeHtml = `<span class="author-badge" style="background:${ec.badge};color:#fff">${entry.author}</span>`;
 
     if (entry.type === 'checkin') {
       groupAuthor = entry.author;
       li.className = 'log-entry checkin';
       li.style.background = ec.base;
+      // Check-in: badge far left, then timestamp, then content
+      const badgeHtml = `<span class="author-badge" style="background:${ec.badge};color:#fff">${entry.author}</span>`;
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
         : '<span class="checkin-no-gps">Location unavailable</span>';
-      li.innerHTML = `${timeEl}${badgeHtml}<div class="entry-body">
+      li.innerHTML = `${badgeHtml}${timeEl}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else {
+      // Notes and photos: no badge — author is communicated by group color
       li.className = 'log-entry';
       if (groupAuthor) {
         li.style.background = AUTHOR_COLORS[groupAuthor]?.tint || '';
@@ -405,12 +461,12 @@ async function renderLog() {
           const url = await vault.getPhotoUrl(s.vault, s.viewedDate, entry.photo);
           if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
         }
-        li.innerHTML = `${timeEl}${badgeHtml}<div class="entry-body">
+        li.innerHTML = `${timeEl}<div class="entry-body">
           <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
           <p class="entry-comment">${esc(entry.comment)}</p>
         </div>`;
       } else {
-        li.innerHTML = `${timeEl}${badgeHtml}<div class="entry-body">${esc(entry.text)}</div>`;
+        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>`;
       }
     }
     list.appendChild(li);
@@ -469,71 +525,6 @@ function updateActionBarState() {
       hint.style.display = 'block';
     }
   }
-}
-
-// ---- Raw tab ----
-let rawSelectedType = null;
-
-function setupRawTab() {
-  $$('.type-chip').forEach(chip => chip.addEventListener('click', () => {
-    $$('.type-chip').forEach(c => c.classList.remove('selected'));
-    chip.classList.add('selected');
-    rawSelectedType = chip.dataset.type;
-  }));
-  $('raw-text').addEventListener('input', updateRawBtn);
-  $('raw-save-btn').addEventListener('click', saveRaw);
-}
-
-function updateRawBtn() {
-  $('raw-save-btn').disabled = !$('raw-text').value.trim();
-}
-
-async function saveRaw() {
-  const text = $('raw-text').value.trim();
-  if (!text) return;
-  const ts      = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
-  const suffix  = rawSelectedType ? `_${rawSelectedType}` : '';
-  const filename = `${TODAY}-${ts}${suffix}.md`;
-
-  const content = rawSelectedType ? `type: ${rawSelectedType}\n\n${text}` : text;
-
-  if (s.vault) {
-    try { await vault.saveRawEntry(s.vault, filename, content); }
-    catch { await enqueueRaw({ filename, content }); setSyncStatus('offline'); showBanner(); }
-  } else {
-    await enqueueRaw({ filename, content });
-  }
-
-  $('raw-text').value = '';
-  $$('.type-chip').forEach(c => c.classList.remove('selected'));
-  rawSelectedType = null;
-  updateRawBtn();
-  await loadRawToday();
-}
-
-
-async function loadRawToday() {
-  if (!s.vault) return;
-  try { s.rawToday = await vault.loadTodayRaw(s.vault, TODAY); }
-  catch { s.rawToday = []; }
-  renderRawToday();
-}
-
-function renderRawToday() {
-  const el = $('raw-today-list');
-  if (!s.rawToday.length) { el.innerHTML = '<p class="empty-state" style="padding:16px 0">Nothing captured today</p>'; return; }
-  el.innerHTML = s.rawToday.map(({ content }) => {
-    const typeM    = content.match(/^type:\s*(\w+)/m);
-    const srcM     = content.match(/^source_type:\s*(\w+)/m);
-    const ratingM  = content.match(/^rating_personal:\s*(\d)/m);
-    const label    = typeM ? typeM[1] : (srcM ? srcM[1] : '');
-    const preview  = content.replace(/^(?:\w[\w_]*:[^\n]*\n)+\n?/, '').slice(0, 100);
-    const ratingHtml = ratingM ? `<span class="raw-rating">${'★'.repeat(+ratingM[1])}</span>` : '';
-    return `<div class="raw-item">
-      <div>${esc(preview)}</div>
-      <div class="raw-item-meta">${label ? `<div class="raw-type">${label}</div>` : ''}${ratingHtml}</div>
-    </div>`;
-  }).join('');
 }
 
 // ---- Wiki tab ----
@@ -618,6 +609,71 @@ async function checkConflicts() {
 function showBanner(id = 'vault-banner') { $(id).classList.add('show'); }
 function hideBanner(id = 'vault-banner') { $(id).classList.remove('show'); }
 
+// ---- Proximity enforcement ----
+
+function haversineMetres(lat1, lon1, lat2, lon2) {
+  const R    = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a    = Math.sin(dLat / 2) ** 2
+             + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+             * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function getLastCheckinGps() {
+  for (let i = s.logEntries.length - 1; i >= 0; i--) {
+    const e = s.logEntries[i];
+    if (e.type === 'checkin' && e.gps) return e.gps;
+  }
+  return null;
+}
+
+async function sampleGpsForProximity() {
+  if (!navigator.geolocation) return null;
+  return new Promise(resolve => {
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      ()  => resolve(null),
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+    );
+  });
+}
+
+// Returns 'ok' or 'out-of-range'. Never blocks on GPS failure.
+async function checkProximity() {
+  const checkinGps = getLastCheckinGps();
+  if (!checkinGps) return 'ok';               // no GPS reference — can't check
+  const currentGps = await sampleGpsForProximity();
+  if (!currentGps) return 'ok';               // GPS unavailable — don't block
+  const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
+  return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
+}
+
+// Writes a pending draft entry to the log without calling loadLog().
+// Called from checkIn() after the new check-in line is already written.
+async function autoSubmitDraft(draft) {
+  if (draft.type === 'note') {
+    await writeLogLine(`${nowHHMM()} | ${s.author} | ${draft.text}`);
+  } else if (draft.type === 'photo') {
+    await finishPhotoWrite(draft.file, draft.ts, draft.comment);
+  }
+}
+
+function showPendingDraft(previewText) {
+  $('pending-preview').textContent = previewText;
+  $('add-bar').style.display = 'none';
+  $('add-bar-hint').style.display = 'none';
+  $('pending-draft').style.display = 'block';
+}
+
+function hidePendingDraft() {
+  s.pendingDraft = null;
+  $('pending-draft').style.display = 'none';
+  $('add-bar').style.display = '';       // reverts to flex via .add-bar CSS
+  updateActionBarState();                // re-evaluates hint and button states
+}
+
 // ---- Helpers ----
 function checkinMapHtml(lat, lon) {
   const zoom = 15;
@@ -630,7 +686,6 @@ function checkinMapHtml(lat, lon) {
   const cw = 200, ch = 120;
   const l0 = Math.round(cw / 2 - fx * 256);
   const t0 = Math.round(ch / 2 - fy * 256);
-  // 2×2 tile grid — point always fully surrounded by map
   const grid = [
     [tx,   ty,   l0,       t0      ],
     [tx+1, ty,   l0 + 256, t0      ],
