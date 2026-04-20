@@ -129,6 +129,21 @@ export async function loadTodayRaw(vault, date) {
   return entries;
 }
 
+// ---- Day folder listing ----
+
+export async function listDayFolders(vault) {
+  const folders = [];
+  try {
+    const daysDir = await vault.getDirectoryHandle('days');
+    for await (const [name, handle] of daysDir) {
+      if (handle.kind === 'directory' && /^\d{4}-\d{2}-\d{2}$/.test(name)) {
+        folders.push(name);
+      }
+    }
+  } catch {}
+  return folders.sort();
+}
+
 // ---- Wiki browse ----
 
 const FOLDERS = {

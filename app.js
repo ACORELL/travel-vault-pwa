@@ -4,15 +4,22 @@ import * as vault from './vault.js';
 // ---- Constants ----
 const TODAY = new Date().toISOString().slice(0, 10);
 
+const AUTHOR_COLORS = {
+  N: { base: '#f9e4ec', tint: 'rgba(249,228,236,0.35)', badge: '#c2185b' },
+  A: { base: '#e4eef9', tint: 'rgba(228,238,249,0.35)', badge: '#1565c0' },
+};
+
 // ---- State ----
 const s = {
-  author:     localStorage.getItem('tv-author'),
-  vault:      null,
-  syncStatus: 'offline',
-  logEntries: [],
-  wikiPages:  [],
-  rawToday:   [],
-  pendingPhoto: null, // { file, ts }
+  author:       localStorage.getItem('tv-author'),
+  vault:        null,
+  syncStatus:   'offline',
+  logEntries:   [],
+  wikiPages:    [],
+  rawToday:     [],
+  pendingPhoto: null,        // { file, ts }
+  viewedDate:   TODAY,       // date currently shown in the log tab
+  availableDays: [],         // sorted list of day folder names that exist in vault
 };
 
 // ---- Boot ----
@@ -102,6 +109,7 @@ async function startApp(handle) {
   setupRawTab();
   setupWikiTab();
 
+  await loadAvailableDays();
   await loadLog();
   if (s.vault) {
     await syncQueue();
@@ -121,6 +129,7 @@ $('reconnect-btn').addEventListener('click', async () => {
     hideBanner('vault-banner');
     setSyncStatus('syncing');
     await syncQueue();
+    await loadAvailableDays();
     await loadLog();
     await loadRawToday();
     await loadWiki();
@@ -182,6 +191,9 @@ function setupLogTab() {
   $('photo-comment').addEventListener('input', () => {
     $('photo-confirm').disabled = !$('photo-comment').value.trim();
   });
+
+  $('day-prev').addEventListener('click', () => navigateDay(-1));
+  $('day-next').addEventListener('click', () => navigateDay(1));
 }
 
 async function checkIn() {
@@ -305,20 +317,22 @@ async function loadLog() {
 
   if (s.vault) {
     try {
-      const text = await vault.readLogMd(s.vault, TODAY);
+      const text = await vault.readLogMd(s.vault, s.viewedDate);
       if (text) s.logEntries = parseLogMd(text);
     } catch {}
   }
 
-  // Merge queued entries for display
+  // Merge queued entries for the viewed date
   const { items } = await getLogQueue();
   for (const item of items) {
-    if (item.date === TODAY) {
+    if (item.date === s.viewedDate) {
       const parsed = parseLogLine(item.line);
       if (parsed) s.logEntries.push(parsed);
     }
   }
   s.logEntries.sort((a, b) => a.time.localeCompare(b.time));
+  updateDayNavUI();
+  updateActionBarState();
   renderLog();
 }
 
@@ -351,36 +365,105 @@ function parseLogLine(line) {
 async function renderLog() {
   const list = $('log-list');
   if (!s.logEntries.length) {
-    list.innerHTML = '<li class="empty-state">No entries yet today</li>';
+    const msg = s.viewedDate === TODAY ? 'No entries yet' : 'No entries for this day';
+    list.innerHTML = `<li class="empty-state">${msg}</li>`;
     return;
   }
   list.innerHTML = '';
+
+  let groupAuthor = null;
+
   for (const entry of s.logEntries) {
     const li = document.createElement('li');
-    li.className = 'log-entry';
     const timeEl = `<span class="entry-time">${entry.time}</span>`;
+    const ec = AUTHOR_COLORS[entry.author] || { base: '#f5f5f5', tint: 'rgba(245,245,245,0.35)', badge: '#999' };
+    const badgeHtml = `<span class="author-badge" style="background:${ec.badge};color:#fff">${entry.author}</span>`;
+
     if (entry.type === 'checkin') {
+      groupAuthor = entry.author;
       li.className = 'log-entry checkin';
+      li.style.background = ec.base;
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
         : '<span class="checkin-no-gps">Location unavailable</span>';
       li.innerHTML = `${timeEl}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
-      </div>`;
-    } else if (entry.type === 'photo') {
-      let thumb = '';
-      if (s.vault && entry.photo) {
-        const url = await vault.getPhotoUrl(s.vault, TODAY, entry.photo);
-        if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
-      }
-      li.innerHTML = `${timeEl}<div class="entry-body">
-        <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
-        <p class="entry-comment">${esc(entry.comment)}</p>
-      </div>`;
+      </div>${badgeHtml}`;
     } else {
-      li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>`;
+      li.className = 'log-entry';
+      if (groupAuthor) {
+        li.style.background = AUTHOR_COLORS[groupAuthor]?.tint || '';
+      }
+
+      if (entry.type === 'photo') {
+        let thumb = '';
+        if (s.vault && entry.photo) {
+          const url = await vault.getPhotoUrl(s.vault, s.viewedDate, entry.photo);
+          if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
+        }
+        li.innerHTML = `${timeEl}<div class="entry-body">
+          <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
+          <p class="entry-comment">${esc(entry.comment)}</p>
+        </div>${badgeHtml}`;
+      } else {
+        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>${badgeHtml}`;
+      }
     }
     list.appendChild(li);
+  }
+}
+
+// ---- Day navigation ----
+
+async function loadAvailableDays() {
+  if (!s.vault) {
+    s.availableDays = [TODAY];
+    return;
+  }
+  const days = await vault.listDayFolders(s.vault);
+  if (!days.includes(TODAY)) days.push(TODAY);
+  s.availableDays = days.sort();
+}
+
+async function navigateDay(dir) {
+  await loadAvailableDays();
+  const idx = s.availableDays.indexOf(s.viewedDate);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= s.availableDays.length) return;
+  s.viewedDate = s.availableDays[newIdx];
+  await loadLog();
+}
+
+function updateDayNavUI() {
+  const idx = s.availableDays.indexOf(s.viewedDate);
+  $('day-nav-label').textContent = s.viewedDate === TODAY ? 'Today' : fmtDate(s.viewedDate);
+  $('day-prev').disabled = idx <= 0;
+  $('day-next').disabled = idx < 0 || idx >= s.availableDays.length - 1;
+}
+
+function updateActionBarState() {
+  const isToday = s.viewedDate === TODAY;
+  const hasCheckin = s.logEntries.some(e => e.type === 'checkin');
+  const hint = $('add-bar-hint');
+
+  if (!isToday) {
+    $('btn-checkin').disabled = true;
+    $('btn-add-note').disabled = true;
+    $('btn-add-photo').disabled = true;
+    hint.textContent = 'Past day — read only';
+    hint.style.display = 'block';
+  } else {
+    $('btn-checkin').disabled = false;
+    $('btn-add-note').disabled = !hasCheckin;
+    $('btn-add-photo').disabled = !hasCheckin;
+    if (hasCheckin) {
+      hint.textContent = '';
+      hint.style.display = 'none';
+    } else {
+      hint.textContent = 'Check in first to add notes and photos';
+      hint.style.display = 'block';
+    }
   }
 }
 
