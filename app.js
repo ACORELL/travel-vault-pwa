@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=19').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=20').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -557,15 +557,17 @@ function formatTodayLine(p) {
   }
   if (p.type === 'transport') {
     const emoji = TRANSPORT_EMOJI[p.subtype] || '🎫';
+    const ref = p.booking_reference ? ` · ref ${esc(p.booking_reference)}` : '';
     if (p.subtype === 'flight') {
-      return `${emoji} ${esc(p.name)} · departs ${p.departure_time || '—'} ${esc(p.departure_point || '')} · arrives ${p.arrival_time || '—'}`;
+      return `${emoji} ${esc(p.name)} · departs ${p.departure_time || '—'} ${esc(p.departure_point || '')} · arrives ${p.arrival_time || '—'}${ref}`;
     }
-    return `${emoji} ${esc(p.name)} · ${esc(p.departure_point || '—')} ${p.departure_time || '—'} · ${esc(p.arrival_point || '—')} ${p.arrival_time || '—'}`;
+    return `${emoji} ${esc(p.name)} · ${esc(p.departure_point || '—')} ${p.departure_time || '—'} · ${esc(p.arrival_point || '—')} ${p.arrival_time || '—'}${ref}`;
   }
   if (p.type === 'activity') {
     const parts = [`🎟️ ${esc(p.name)}`];
     if (p.reservation_time) parts.push(p.reservation_time);
     if (p.meeting_point) parts.push(esc(p.meeting_point));
+    if (p.booking_reference) parts.push(`ref ${esc(p.booking_reference)}`);
     return parts.join(' · ');
   }
   return esc(p.name);
