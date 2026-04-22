@@ -36,7 +36,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=24').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=25').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -809,6 +809,27 @@ const STRIP_CATEGORY_ORDER = ['transport', 'hotel', 'activity'];
 const STRIP_CATEGORY_LABEL = { transport: 'Flights', hotel: 'Hotels', activity: 'Activities' };
 const STRIP_CATEGORY_CLASS = { hotel: 'today-item-hotel', transport: 'today-item-transport', activity: 'today-item-activity' };
 
+function primaryTime(p) {
+  if (p.type === 'hotel')     return p.check_in_time    || '00:00';
+  if (p.type === 'transport') return p.departure_time   || '00:00';
+  if (p.type === 'activity')  return p.reservation_time || '00:00';
+  return '00:00';
+}
+
+function findNextUpcoming(items) {
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  let best = null, bestDiff = Infinity;
+  for (const p of items) {
+    const t = primaryTime(p);
+    if (!t || t === '00:00') continue;
+    const [h, m] = t.split(':').map(Number);
+    const diff = h * 60 + m - nowMins;
+    if (diff > 0 && diff < bestDiff) { bestDiff = diff; best = p; }
+  }
+  return best;
+}
+
 function renderTodayStrip() {
   const strip = $('today-strip');
 
@@ -820,12 +841,6 @@ function renderTodayStrip() {
     if (p.type === 'activity' && p.reservation_date) return p.reservation_date === date;
     return false;
   }
-  function primaryTime(p) {
-    if (p.type === 'hotel')     return p.check_in_time    || '00:00';
-    if (p.type === 'transport') return p.departure_time   || '00:00';
-    if (p.type === 'activity')  return p.reservation_time || '00:00';
-    return '00:00';
-  }
 
   const todayItems    = s.wikiPages.filter(p => matchesDate(p, TODAY));
   const tomorrowItems = s.wikiPages.filter(p => matchesDate(p, TOMORROW));
@@ -834,6 +849,8 @@ function renderTodayStrip() {
 
   todayItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
   tomorrowItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
+
+  const upcomingItem = findNextUpcoming(todayItems);
 
   const grouped = {};
   for (const p of todayItems) { (grouped[p.type] = grouped[p.type] || []).push(p); }
@@ -847,7 +864,8 @@ function renderTodayStrip() {
     for (const p of grouped[type]) {
       const foldHtml = buildFoldHtml(p, n);
       const catClass = STRIP_CATEGORY_CLASS[type] || '';
-      html += `<div class="today-item ${catClass}">
+      const upcomingClass = p === upcomingItem ? ' today-item-upcoming' : '';
+      html += `<div class="today-item ${catClass}${upcomingClass}">
         <div class="today-item-row" data-idx="${n}">
           <span class="today-item-line">${formatTodayLine(p)}</span>
           ${foldHtml ? '<span class="today-item-arrow">›</span>' : ''}
@@ -1360,5 +1378,7 @@ function renderTestStrip() {
   console.log('[TV] Test strip rendered — 3 cards (hotel, transport, activity)');
 }
 window.renderTestStrip = renderTestStrip;
+
+setInterval(renderTodayStrip, 60000);
 
 init();
