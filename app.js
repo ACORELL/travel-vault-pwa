@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=20').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=21').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -534,6 +534,15 @@ function setupWikiTab() {
   $('wiki-capture-btn').addEventListener('click', openCaptureSheet);
   $('capture-cancel').addEventListener('click', closeCaptureSheet);
   $('capture-save').addEventListener('click', saveRawCapture);
+
+  if (location.search.includes('dev=1')) {
+    const testBtn = document.createElement('button');
+    testBtn.className = 'wiki-cap-btn';
+    testBtn.textContent = 'Test strip';
+    testBtn.style.marginRight = '6px';
+    testBtn.addEventListener('click', renderTestStrip);
+    $('wiki-cap-row').prepend(testBtn);
+  }
 }
 
 async function loadWiki() {
@@ -576,10 +585,10 @@ function formatTodayLine(p) {
 function buildFoldHtml(p, idx) {
   const rows = [];
   if (p.type === 'hotel' && p.booking_reference) {
-    rows.push(`<div class="today-fold-row"><strong>Booking reference: ${esc(p.booking_reference)}</strong></div>`);
+    rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
   }
   if (p.type === 'hotel' && p.laundry) {
-    rows.push(`<div class="today-fold-row">🧺 ${esc(p.laundry)}</div>`);
+    rows.push(`<div class="today-fold-row"><span class="fold-label">🧺 Laundry</span> ${esc(p.laundry)}</div>`);
   }
   if (p.type === 'hotel' && p.room_service_url) {
     rows.push(`<div class="today-fold-row"><a href="${esc(p.room_service_url)}" target="_blank" rel="noopener">Room service menu</a></div>`);
@@ -594,11 +603,11 @@ function buildFoldHtml(p, idx) {
     rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
   }
   if (p.special_notes) {
-    rows.push(`<div class="today-fold-row">📝 ${esc(p.special_notes)}</div>`);
+    rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
   }
   if (p.reservation_items && p.reservation_items.length) {
     const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
-    rows.push(`<div class="today-fold-row"><ol class="today-fold-list">${items}</ol></div>`);
+    rows.push(`<div class="today-fold-row"><span class="fold-label">Confirmed</span><ol class="today-fold-list">${items}</ol></div>`);
   }
   if (p.sources && p.sources.length) {
     p.sources.forEach(src => {
@@ -611,6 +620,10 @@ function buildFoldHtml(p, idx) {
   }
   return rows.join('');
 }
+
+const STRIP_CATEGORY_ORDER = ['hotel', 'transport', 'activity'];
+const STRIP_CATEGORY_LABEL = { hotel: 'Hotels', transport: 'Flights', activity: 'Activities' };
+const STRIP_CATEGORY_CLASS = { hotel: 'today-item-hotel', transport: 'today-item-transport', activity: 'today-item-activity' };
 
 function renderTodayStrip() {
   const strip = $('today-strip');
@@ -633,23 +646,35 @@ function renderTodayStrip() {
 
   if (!items.length) { strip.innerHTML = ''; return; }
 
-  strip.innerHTML = '<div class="today-strip-heading">Today</div>' +
-    items.map((p, i) => {
-      const foldHtml = buildFoldHtml(p, i);
-      const hasArrow = !!foldHtml;
-      return `<div class="today-item">
-        <div class="today-item-row" data-idx="${i}">
+  const grouped = {};
+  for (const p of items) { (grouped[p.type] = grouped[p.type] || []).push(p); }
+
+  let n = 0;
+  let html = '<div class="today-strip-heading">Today</div>';
+
+  for (const type of STRIP_CATEGORY_ORDER) {
+    if (!grouped[type]) continue;
+    html += `<div class="today-category-header">${STRIP_CATEGORY_LABEL[type]}</div>`;
+    for (const p of grouped[type]) {
+      const foldHtml = buildFoldHtml(p, n);
+      const catClass = STRIP_CATEGORY_CLASS[type] || '';
+      html += `<div class="today-item ${catClass}">
+        <div class="today-item-row" data-idx="${n}">
           <span class="today-item-line">${formatTodayLine(p)}</span>
-          ${hasArrow ? '<span class="today-item-arrow">›</span>' : ''}
+          ${foldHtml ? '<span class="today-item-arrow">›</span>' : ''}
         </div>
-        ${foldHtml ? `<div class="today-fold" data-idx="${i}">${foldHtml}</div>` : ''}
+        ${foldHtml ? `<div class="today-fold" data-idx="${n}">${foldHtml}</div>` : ''}
       </div>`;
-    }).join('');
+      n++;
+    }
+  }
+
+  strip.innerHTML = html;
 
   strip.querySelectorAll('.today-item-row[data-idx]').forEach(row => {
     row.addEventListener('click', () => {
-      const idx = row.dataset.idx;
-      const fold = strip.querySelector(`.today-fold[data-idx="${idx}"]`);
+      const i = row.dataset.idx;
+      const fold = strip.querySelector(`.today-fold[data-idx="${i}"]`);
       if (!fold) return;
       const opening = !fold.classList.contains('open');
       fold.classList.toggle('open', opening);
@@ -1056,5 +1081,96 @@ function hide(id)    { $(id).classList.add('hidden'); }
 
 $('reset-btn-1').addEventListener('click', resetApp);
 $('reset-btn-2').addEventListener('click', resetApp);
+
+// ---- Test fixture ----
+function renderTestStrip() {
+  const testPages = [
+    {
+      type: 'hotel', name: 'Grand Hotel Lisboa',
+      check_in_time: '15:00', check_out_time: '11:00',
+      breakfast_included: true, breakfast_time: '07:30',
+      booking_reference: 'HTL-001',
+      laundry: 'Floor 2, coin machine, €3/wash',
+      room_service_url: '', maps_url: '',
+      special_notes: 'No front desk after 22:00 — key lockbox.',
+      reservation_items: ['Late checkout confirmed: 13:00'],
+      sources: [],
+    },
+    {
+      type: 'transport', subtype: 'flight', name: 'TAP 351 LIS–OPO',
+      departure_time: '14:25', departure_point: 'Lisbon Airport T2',
+      arrival_time: '15:10', arrival_point: 'Porto Airport',
+      booking_reference: 'FLT-002',
+      special_notes: 'Check-in closes 13:25',
+      reservation_items: ['Window seat row 12'],
+      sources: [],
+    },
+    {
+      type: 'activity', name: 'Sintra Day Tour',
+      reservation_time: '09:00', meeting_point: 'Rossio station, south exit',
+      details_url: '', maps_url: '',
+      special_notes: 'Bring comfortable shoes',
+      reservation_items: ['Vegetarian lunch confirmed', 'Fast-track entry included'],
+      sources: [],
+    },
+  ];
+
+  const STRIP_DEMO_HTML = `<div class="today-fold-row" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+    <div class="strip-row">
+      <div class="strip-col">
+        <span class="strip-label">Label A</span>
+        <span class="strip-value">Placeholder value</span>
+      </div>
+      <div class="strip-col">
+        <span class="strip-label">Label B</span>
+        <span class="strip-value">Another value</span>
+      </div>
+    </div>
+  </div>`;
+
+  const grouped = {};
+  for (const p of testPages) { (grouped[p.type] = grouped[p.type] || []).push(p); }
+
+  let n = 0;
+  let html = '<div class="today-strip-heading">Today (test)</div>';
+
+  for (const type of STRIP_CATEGORY_ORDER) {
+    if (!grouped[type]) continue;
+    html += `<div class="today-category-header">${STRIP_CATEGORY_LABEL[type]}</div>`;
+    for (const p of grouped[type]) {
+      const foldHtml = buildFoldHtml(p, n) + STRIP_DEMO_HTML;
+      const catClass = STRIP_CATEGORY_CLASS[type] || '';
+      html += `<div class="today-item ${catClass}">
+        <div class="today-item-row" data-idx="${n}">
+          <span class="today-item-line">${formatTodayLine(p)}</span>
+          <span class="today-item-arrow">›</span>
+        </div>
+        <div class="today-fold" data-idx="${n}">${foldHtml}</div>
+      </div>`;
+      n++;
+    }
+  }
+
+  const strip = $('today-strip');
+  strip.innerHTML = html;
+
+  strip.querySelectorAll('.today-item-row[data-idx]').forEach(row => {
+    row.addEventListener('click', () => {
+      const i = row.dataset.idx;
+      const fold = strip.querySelector(`.today-fold[data-idx="${i}"]`);
+      if (!fold) return;
+      const opening = !fold.classList.contains('open');
+      fold.classList.toggle('open', opening);
+      const arrow = row.querySelector('.today-item-arrow');
+      if (arrow) arrow.textContent = opening ? '∨' : '›';
+    });
+  });
+
+  // Switch to wiki tab so the strip is visible
+  $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'wiki'));
+  $$('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-wiki'));
+  console.log('[TV] Test strip rendered — 3 cards (hotel, transport, activity)');
+}
+window.renderTestStrip = renderTestStrip;
 
 init();

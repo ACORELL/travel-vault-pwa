@@ -144,8 +144,8 @@
 
     /* ---- Today strip ---- */
     #today-strip:not(:empty) { margin-bottom: 14px; }
-    .today-strip-heading { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
-    .today-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+    .today-strip-heading { font-size: 11px; font-variant: small-caps; font-weight: 500; color: var(--muted); letter-spacing: .08em; margin-bottom: 6px; }
+    .today-item { border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 4px; margin-bottom: 6px; overflow: hidden; }
     .today-item-row { padding: 10px 12px; font-size: 13px; line-height: 1.4; cursor: pointer; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
     .today-item-row:active { background: var(--surface); }
     .today-item-line { flex: 1; }
@@ -159,6 +159,16 @@
     .today-fold-list li { margin-top: 3px; }
     .today-source-label { font-size: 12px; color: var(--muted); font-weight: 500; display: block; margin-bottom: 4px; }
     .today-source-content { background: var(--surface); border-radius: 6px; padding: 8px; font-size: 12px; font-family: 'Courier New', monospace; white-space: pre-wrap; overflow-x: auto; max-height: 200px; overflow-y: auto; }
+    .today-item-hotel    { border-left-color: #c8960a; background: rgba(255, 243, 220, 0.08); }
+    .today-item-transport { border-left-color: #4a8fc8; background: rgba(221, 238, 255, 0.08); }
+    .today-item-activity  { border-left-color: #3a9e50; background: rgba(228, 242, 228, 0.08); }
+    .today-category-header { font-size: 10px; font-variant: small-caps; font-weight: 500; color: var(--muted); letter-spacing: .08em; margin: 10px 0 4px; }
+    .today-category-header:first-child { margin-top: 0; }
+    .strip-row { display: flex; gap: 16px; }
+    .strip-col { flex: 1; min-width: 0; }
+    .strip-label { font-size: 11px; font-weight: 600; color: #555; display: block; margin-bottom: 2px; }
+    .strip-value { font-size: 13px; color: #1a1a1a; display: block; }
+    .fold-label { font-weight: 600; color: #1a1a1a; }
     .wiki-accordion-section { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
     .wiki-accordion-header { width: 100%; padding: 12px 14px; font-size: 14px; font-weight: 600; background: none; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-family: inherit; text-align: left; color: #1a1a1a; }
     .wiki-accordion-header:active { background: var(--surface); }
