@@ -3,6 +3,15 @@ import * as vault from './vault.js';
 
 // ---- Constants ----
 const TODAY = new Date().toISOString().slice(0, 10);
+const TOMORROW = (() => {
+  const d = new Date(TODAY + 'T12:00:00');
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+})();
+const IS_WEEKEND_TODAY = (() => {
+  const day = new Date(TODAY + 'T12:00:00').getDay();
+  return day === 0 || day === 6;
+})();
 
 const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
 
@@ -27,7 +36,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=21').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=22').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -556,98 +565,315 @@ async function loadWiki() {
 
 const TRANSPORT_EMOJI = { flight: '✈️', train: '🚆', bus: '🚌', ferry: '⛴️', other: '🎫' };
 
+// ---- Stay helpers ----
+function stayDayOf(checkInDate, today) {
+  const ms = new Date(today + 'T12:00:00') - new Date(checkInDate + 'T12:00:00');
+  return Math.floor(ms / 86400000) + 1;
+}
+function stayNights(checkInDate, checkOutDate) {
+  const ms = new Date(checkOutDate + 'T12:00:00') - new Date(checkInDate + 'T12:00:00');
+  return Math.floor(ms / 86400000);
+}
+
+// ---- Flight detail helpers ----
+function extractFlightNum(name) {
+  const m = name.match(/\bFlight\s+([A-Z]{2,3}\s*\d+)/i) || name.match(/\b([A-Z]{2,3}\s*\d{2,4})\b/);
+  return m ? m[1].trim() : name;
+}
+function extractIATA(point) {
+  const m = (point || '').match(/\(([A-Z]{3})\)/);
+  return m ? m[1] : null;
+}
+function extractTerminal(point) {
+  const m = (point || '').match(/Terminal\s+(\S+)/i);
+  return m ? m[1] : null;
+}
+function extractAirportName(point) {
+  return (point || '').replace(/\s*\([A-Z]{3}\)/, '').split(',')[0].trim();
+}
+function extractPassengers(items) {
+  return (items || []).map(item => {
+    const m = item.match(/\(([^)]+)\)\s*$/);
+    return m ? m[1].trim() : null;
+  }).filter(Boolean);
+}
+
 function formatTodayLine(p) {
   if (p.type === 'hotel') {
-    const bkfast = p.breakfast_included
-      ? (p.breakfast_time ? `breakfast ${p.breakfast_time}` : 'breakfast included')
-      : 'breakfast none';
-    const ref = p.booking_reference ? ` · ref ${esc(p.booking_reference)}` : '';
-    return `🏨 ${esc(p.name)} · check-in ${p.check_in_time || '—'} · check-out ${p.check_out_time || '—'} · ${bkfast}${ref}`;
+    const x = stayDayOf(p.check_in_date, TODAY);
+    const y = stayNights(p.check_in_date, p.check_out_date);
+    const ciTime = (IS_WEEKEND_TODAY && p.check_in_time_weekend) ? p.check_in_time_weekend : (p.check_in_time || '—');
+    return `🏨 ${esc(p.name)} · Day ${x} of ${y} · Check-in ${esc(ciTime)}`;
+  }
+  if (p.type === 'transport' && p.subtype === 'flight') {
+    const flightNum = extractFlightNum(p.name);
+    const origin = extractIATA(p.departure_point) || esc(p.departure_point || '—');
+    const dest   = extractIATA(p.arrival_point)   || esc(p.arrival_point   || '—');
+    return `✈️ ${esc(flightNum)} · ${esc(p.departure_time || '—')} · ${origin} → ${dest}`;
   }
   if (p.type === 'transport') {
     const emoji = TRANSPORT_EMOJI[p.subtype] || '🎫';
-    const ref = p.booking_reference ? ` · ref ${esc(p.booking_reference)}` : '';
-    if (p.subtype === 'flight') {
-      return `${emoji} ${esc(p.name)} · departs ${p.departure_time || '—'} ${esc(p.departure_point || '')} · arrives ${p.arrival_time || '—'}${ref}`;
-    }
-    return `${emoji} ${esc(p.name)} · ${esc(p.departure_point || '—')} ${p.departure_time || '—'} · ${esc(p.arrival_point || '—')} ${p.arrival_time || '—'}${ref}`;
+    return `${emoji} ${esc(p.name)} · ${esc(p.departure_point || '—')} ${esc(p.departure_time || '—')} · ${esc(p.arrival_point || '—')} ${esc(p.arrival_time || '—')}`;
   }
   if (p.type === 'activity') {
     const parts = [`🎟️ ${esc(p.name)}`];
-    if (p.reservation_time) parts.push(p.reservation_time);
-    if (p.meeting_point) parts.push(esc(p.meeting_point));
-    if (p.booking_reference) parts.push(`ref ${esc(p.booking_reference)}`);
+    if (p.reservation_time) parts.push(esc(p.reservation_time));
     return parts.join(' · ');
   }
   return esc(p.name);
 }
 
+function formatTomorrowLine(p) {
+  if (p.type === 'transport' && p.subtype === 'flight') {
+    return `✈️ ${esc(extractFlightNum(p.name))} · ${esc(p.departure_time || '—')}`;
+  }
+  if (p.type === 'transport') {
+    const emoji = TRANSPORT_EMOJI[p.subtype] || '🎫';
+    return `${emoji} ${esc(p.name)} · ${esc(p.departure_time || '—')}`;
+  }
+  if (p.type === 'hotel') {
+    const suffix = (p.check_in_date === TOMORROW && p.check_in_time) ? ` · Check-in ${esc(p.check_in_time)}` : '';
+    return `🏨 ${esc(p.name)}${suffix}`;
+  }
+  if (p.type === 'activity') {
+    return `🎟️ ${esc(p.name)} · ${esc(p.reservation_time || '—')}`;
+  }
+  return esc(p.name);
+}
+
+// ---- Fold-out helpers ----
+function pairRow(col1Html, col2Html) {
+  return `<div class="today-fold-row"><div class="strip-row">` +
+    `<div class="strip-col">${col1Html}</div>` +
+    `<div class="strip-col">${col2Html}</div>` +
+    `</div></div>`;
+}
+function lv(label, value) {
+  return `<span class="strip-label">${esc(label)}</span><span class="strip-value">${value}</span>`;
+}
+
 function buildFoldHtml(p, idx) {
   const rows = [];
-  if (p.type === 'hotel' && p.booking_reference) {
-    rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
-  }
-  if (p.type === 'hotel' && p.laundry) {
-    rows.push(`<div class="today-fold-row"><span class="fold-label">🧺 Laundry</span> ${esc(p.laundry)}</div>`);
-  }
-  if (p.type === 'hotel' && p.room_service_url) {
-    rows.push(`<div class="today-fold-row"><a href="${esc(p.room_service_url)}" target="_blank" rel="noopener">Room service menu</a></div>`);
-  }
-  if (p.type === 'activity' && p.details_url) {
-    rows.push(`<div class="today-fold-row"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details</a></div>`);
-  }
-  if (p.maps_url) {
-    rows.push(`<div class="today-fold-row"><a href="${esc(p.maps_url)}" target="_blank" rel="noopener">Open in Maps →</a></div>`);
-  } else if (p.lat !== null && p.lat !== undefined && p.lon !== null && p.lon !== undefined) {
-    const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
-    rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
-  }
-  if (p.special_notes) {
-    rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
-  }
-  if (p.reservation_items && p.reservation_items.length) {
-    const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
-    rows.push(`<div class="today-fold-row"><span class="fold-label">Confirmed</span><ol class="today-fold-list">${items}</ol></div>`);
-  }
-  if (p.sources && p.sources.length) {
-    p.sources.forEach(src => {
-      const filename = src.split('/').pop();
+
+  if (p.type === 'transport' && p.subtype === 'flight') {
+    const flightNum   = extractFlightNum(p.name);
+    const terminal    = extractTerminal(p.departure_point);
+    const airportName = extractAirportName(p.departure_point);
+    const terminalStr = terminal ? `Terminal ${esc(terminal)}` : 'Terminal: Not known';
+    const airlineStr  = esc(p.airline || '—');
+
+    rows.push(pairRow(lv('Departs', esc(p.departure_time || '—')), lv('Flight', esc(flightNum))));
+    rows.push(pairRow(lv('Airline', airlineStr), `<span class="strip-value">${terminalStr}</span>`));
+
+    if (airportName) {
+      rows.push(`<div class="today-fold-row">${esc(airportName)}</div>`);
+    }
+    if (p.lat != null && p.lon != null) {
+      const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
+      rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">${esc(p.departure_point || 'Departure airport')}</a></div>`);
+    }
+
+    const hasSrc = p.sources && p.sources.length;
+    if (p.booking_reference && hasSrc) {
+      const src = p.sources[0];
       rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
-        `<span class="today-source-label">${esc(filename)}</span>` +
+        `<div class="strip-row">` +
+          `<div class="strip-col">${lv('Booking ref', esc(p.booking_reference))}</div>` +
+          `<div class="strip-col"><span class="today-source-label strip-value">View doc →</span></div>` +
+        `</div>` +
         `<div class="today-source-content" style="display:none"></div>` +
         `</div>`);
-    });
+    } else if (p.booking_reference) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
+    } else if (hasSrc) {
+      p.sources.forEach(src => {
+        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+          `<span class="today-source-label">View doc →</span>` +
+          `<div class="today-source-content" style="display:none"></div>` +
+          `</div>`);
+      });
+    }
+
+    const passengers = extractPassengers(p.reservation_items);
+    if (passengers.length >= 2) {
+      rows.push(pairRow(`<span class="strip-value">${esc(passengers[0])}</span>`, `<span class="strip-value">${esc(passengers[1])}</span>`));
+    } else if (passengers.length === 1) {
+      rows.push(`<div class="today-fold-row">${esc(passengers[0])}</div>`);
+    }
+
+    if (p.special_notes) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
+    }
+
+  } else if (p.type === 'hotel') {
+    const ciTime = (IS_WEEKEND_TODAY && p.check_in_time_weekend)  ? p.check_in_time_weekend  : (p.check_in_time  || '—');
+    const coTime = (IS_WEEKEND_TODAY && p.check_out_time_weekend) ? p.check_out_time_weekend : (p.check_out_time || '—');
+
+    if (p.check_in_date && p.check_out_date) {
+      const x = stayDayOf(p.check_in_date, TODAY);
+      const y = stayNights(p.check_in_date, p.check_out_date);
+      rows.push(`<div class="today-fold-banner">Day ${x} of ${y}</div>`);
+    }
+
+    rows.push(pairRow(lv('Check-in', esc(ciTime)), lv('Check-out', esc(coTime))));
+
+    if (p.booking_reference) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
+    }
+
+    if (p.address) {
+      const geoUri = (p.lat != null && p.lon != null)
+        ? `geo:${p.lat},${p.lon}?q=${encodeURIComponent(p.address)}`
+        : null;
+      rows.push(geoUri
+        ? `<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">${esc(p.address)}</a></div>`
+        : `<div class="today-fold-row">${esc(p.address)}</div>`);
+    } else if (p.lat != null && p.lon != null) {
+      const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
+      rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
+    }
+
+    if (p.phone) {
+      const telHref = `tel:${p.phone.replace(/[\s-]/g, '')}`;
+      rows.push(`<div class="today-fold-row"><a href="${esc(telHref)}">${esc(p.phone)}</a></div>`);
+    }
+
+    const hasSrc = p.sources && p.sources.length;
+    const hasWeb = p.website_url;
+    if (hasSrc && hasWeb) {
+      const src = p.sources[0];
+      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+        `<div class="strip-row">` +
+          `<div class="strip-col"><span class="today-source-label strip-value">View doc →</span></div>` +
+          `<div class="strip-col"><a href="${esc(p.website_url)}" target="_blank" rel="noopener">Hotel website →</a></div>` +
+        `</div>` +
+        `<div class="today-source-content" style="display:none"></div>` +
+        `</div>`);
+    } else if (hasSrc) {
+      p.sources.forEach(src => {
+        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+          `<span class="today-source-label">View doc →</span>` +
+          `<div class="today-source-content" style="display:none"></div>` +
+          `</div>`);
+      });
+    } else if (hasWeb) {
+      rows.push(`<div class="today-fold-row"><a href="${esc(p.website_url)}" target="_blank" rel="noopener">Hotel website →</a></div>`);
+    }
+
+    if (p.special_notes) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
+    }
+    if (p.laundry) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">🧺 Laundry</span> ${esc(p.laundry)}</div>`);
+    }
+    if (p.room_service_url) {
+      rows.push(`<div class="today-fold-row"><a href="${esc(p.room_service_url)}" target="_blank" rel="noopener">Room service menu</a></div>`);
+    }
+    if (p.reservation_items && p.reservation_items.length) {
+      const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
+      rows.push(`<div class="today-fold-row"><span class="fold-label">Confirmed</span><ol class="today-fold-list">${items}</ol></div>`);
+    }
+
+  } else if (p.type === 'activity') {
+    rows.push(`<div class="today-fold-row"><strong>${esc(p.name)}</strong></div>`);
+
+    if (p.reservation_time && p.booking_reference) {
+      rows.push(pairRow(`<span class="strip-value">${esc(p.reservation_time)}</span>`, `<span class="strip-value">Ref ${esc(p.booking_reference)}</span>`));
+    } else if (p.reservation_time) {
+      rows.push(`<div class="today-fold-row">${esc(p.reservation_time)}</div>`);
+    } else if (p.booking_reference) {
+      rows.push(`<div class="today-fold-row">Ref ${esc(p.booking_reference)}</div>`);
+    }
+
+    if (p.lat != null && p.lon != null) {
+      const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
+      const addr = p.meeting_point || 'Open in Maps';
+      rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">${esc(addr)}</a></div>`);
+    }
+
+    if (p.special_notes) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
+    }
+    if (p.details_url) {
+      rows.push(`<div class="today-fold-row"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details →</a></div>`);
+    }
+    if (p.reservation_items && p.reservation_items.length) {
+      const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
+      rows.push(`<div class="today-fold-row"><span class="fold-label">Confirmed</span><ol class="today-fold-list">${items}</ol></div>`);
+    }
+    if (p.sources && p.sources.length) {
+      p.sources.forEach(src => {
+        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+          `<span class="today-source-label">View doc →</span>` +
+          `<div class="today-source-content" style="display:none"></div>` +
+          `</div>`);
+      });
+    }
+
+  } else {
+    // Non-flight transport and other types
+    if (p.booking_reference) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
+    }
+    if (p.maps_url) {
+      rows.push(`<div class="today-fold-row"><a href="${esc(p.maps_url)}" target="_blank" rel="noopener">Open in Maps →</a></div>`);
+    } else if (p.lat != null && p.lon != null) {
+      const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
+      rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
+    }
+    if (p.special_notes) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
+    }
+    if (p.reservation_items && p.reservation_items.length) {
+      const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
+      rows.push(`<div class="today-fold-row"><span class="fold-label">Confirmed</span><ol class="today-fold-list">${items}</ol></div>`);
+    }
+    if (p.sources && p.sources.length) {
+      p.sources.forEach(src => {
+        const filename = src.split('/').pop();
+        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+          `<span class="today-source-label">${esc(filename)}</span>` +
+          `<div class="today-source-content" style="display:none"></div>` +
+          `</div>`);
+      });
+    }
   }
+
   return rows.join('');
 }
 
-const STRIP_CATEGORY_ORDER = ['hotel', 'transport', 'activity'];
-const STRIP_CATEGORY_LABEL = { hotel: 'Hotels', transport: 'Flights', activity: 'Activities' };
+const STRIP_CATEGORY_ORDER = ['transport', 'hotel', 'activity'];
+const STRIP_CATEGORY_LABEL = { transport: 'Flights', hotel: 'Hotels', activity: 'Activities' };
 const STRIP_CATEGORY_CLASS = { hotel: 'today-item-hotel', transport: 'today-item-transport', activity: 'today-item-activity' };
 
 function renderTodayStrip() {
   const strip = $('today-strip');
-  const items = s.wikiPages.filter(p => {
-    if (p.type === 'hotel' && p.check_in_date && p.check_out_date) {
-      return p.check_in_date <= TODAY && TODAY <= p.check_out_date;
-    }
-    if (p.type === 'transport' && p.date) return p.date === TODAY;
-    if (p.type === 'activity' && p.reservation_date) return p.reservation_date === TODAY;
-    return false;
-  });
 
+  function matchesDate(p, date) {
+    if (p.type === 'hotel' && p.check_in_date && p.check_out_date) {
+      return p.check_in_date <= date && date <= p.check_out_date;
+    }
+    if (p.type === 'transport' && p.date) return p.date === date;
+    if (p.type === 'activity' && p.reservation_date) return p.reservation_date === date;
+    return false;
+  }
   function primaryTime(p) {
-    if (p.type === 'hotel')     return p.check_in_time  || '00:00';
-    if (p.type === 'transport') return p.departure_time || '00:00';
+    if (p.type === 'hotel')     return p.check_in_time    || '00:00';
+    if (p.type === 'transport') return p.departure_time   || '00:00';
     if (p.type === 'activity')  return p.reservation_time || '00:00';
     return '00:00';
   }
-  items.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
 
-  if (!items.length) { strip.innerHTML = ''; return; }
+  const todayItems    = s.wikiPages.filter(p => matchesDate(p, TODAY));
+  const tomorrowItems = s.wikiPages.filter(p => matchesDate(p, TOMORROW));
+
+  if (!todayItems.length && !tomorrowItems.length) { strip.innerHTML = ''; return; }
+
+  todayItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
+  tomorrowItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
 
   const grouped = {};
-  for (const p of items) { (grouped[p.type] = grouped[p.type] || []).push(p); }
+  for (const p of todayItems) { (grouped[p.type] = grouped[p.type] || []).push(p); }
 
   let n = 0;
   let html = '<div class="today-strip-heading">Today</div>';
@@ -666,6 +892,14 @@ function renderTodayStrip() {
         ${foldHtml ? `<div class="today-fold" data-idx="${n}">${foldHtml}</div>` : ''}
       </div>`;
       n++;
+    }
+  }
+
+  if (tomorrowItems.length) {
+    html += '<hr class="today-divider">';
+    html += '<div class="today-strip-heading">Tomorrow</div>';
+    for (const p of tomorrowItems) {
+      html += `<div class="today-tomorrow-item"><span class="today-item-line">${formatTomorrowLine(p)}</span></div>`;
     }
   }
 
@@ -1086,47 +1320,38 @@ $('reset-btn-2').addEventListener('click', resetApp);
 function renderTestStrip() {
   const testPages = [
     {
-      type: 'hotel', name: 'Grand Hotel Lisboa',
-      check_in_time: '15:00', check_out_time: '11:00',
-      breakfast_included: true, breakfast_time: '07:30',
-      booking_reference: 'HTL-001',
-      laundry: 'Floor 2, coin machine, €3/wash',
+      type: 'transport', subtype: 'flight', name: 'Flight SK 683 — Copenhagen to Rome',
+      departure_time: '06:45', departure_point: 'Copenhagen Airport (CPH), Terminal 2',
+      arrival_time: '10:05', arrival_point: 'Rome Fiumicino Airport (FCO), Terminal 3',
+      airline: 'SAS', booking_reference: 'SKAS7X',
+      special_notes: 'Meal: Standard included.',
+      reservation_items: ['Seat 14A (Passenger A)', 'Seat 14B (Passenger B)'],
+      lat: 55.618, lon: 12.656, sources: [],
+    },
+    {
+      type: 'hotel', name: 'Hotel Tornabuoni Roma',
+      check_in_date: TODAY, check_out_date: (() => { const d = new Date(TODAY + 'T12:00:00'); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })(),
+      check_in_time: '13:00', check_out_time: '12:00',
+      check_in_time_weekend: '14:00', check_out_time_weekend: '12:00',
+      booking_reference: 'HTC-88421-R',
+      phone: '+39 06 6784 2200', website_url: 'https://www.tornabuoniroma.it',
+      address: 'Via del Corso 12, 00186 Roma RM, Italy',
+      laundry: 'Basement B1. Coin op, €4/wash.',
       room_service_url: '', maps_url: '',
-      special_notes: 'No front desk after 22:00 — key lockbox.',
-      reservation_items: ['Late checkout confirmed: 13:00'],
-      sources: [],
+      special_notes: 'No front desk after 23:00.',
+      reservation_items: ['Early check-in 13:00 confirmed'],
+      lat: 41.9009, lon: 12.4833, sources: [],
     },
     {
-      type: 'transport', subtype: 'flight', name: 'TAP 351 LIS–OPO',
-      departure_time: '14:25', departure_point: 'Lisbon Airport T2',
-      arrival_time: '15:10', arrival_point: 'Porto Airport',
-      booking_reference: 'FLT-002',
-      special_notes: 'Check-in closes 13:25',
-      reservation_items: ['Window seat row 12'],
-      sources: [],
-    },
-    {
-      type: 'activity', name: 'Sintra Day Tour',
-      reservation_time: '09:00', meeting_point: 'Rossio station, south exit',
-      details_url: '', maps_url: '',
-      special_notes: 'Bring comfortable shoes',
-      reservation_items: ['Vegetarian lunch confirmed', 'Fast-track entry included'],
-      sources: [],
+      type: 'activity', name: 'Colosseum Guided Tour',
+      reservation_time: '09:00', booking_reference: 'GYG-554821',
+      meeting_point: 'Outside main entrance, Piazza del Colosseo 1, Roma',
+      details_url: 'https://example.com', maps_url: '',
+      special_notes: 'Small group, max 12.',
+      reservation_items: ['Audio headset included', '2 participants'],
+      lat: 41.8902, lon: 12.4922, sources: [],
     },
   ];
-
-  const STRIP_DEMO_HTML = `<div class="today-fold-row" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-    <div class="strip-row">
-      <div class="strip-col">
-        <span class="strip-label">Label A</span>
-        <span class="strip-value">Placeholder value</span>
-      </div>
-      <div class="strip-col">
-        <span class="strip-label">Label B</span>
-        <span class="strip-value">Another value</span>
-      </div>
-    </div>
-  </div>`;
 
   const grouped = {};
   for (const p of testPages) { (grouped[p.type] = grouped[p.type] || []).push(p); }
@@ -1138,7 +1363,7 @@ function renderTestStrip() {
     if (!grouped[type]) continue;
     html += `<div class="today-category-header">${STRIP_CATEGORY_LABEL[type]}</div>`;
     for (const p of grouped[type]) {
-      const foldHtml = buildFoldHtml(p, n) + STRIP_DEMO_HTML;
+      const foldHtml = buildFoldHtml(p, n);
       const catClass = STRIP_CATEGORY_CLASS[type] || '';
       html += `<div class="today-item ${catClass}">
         <div class="today-item-row" data-idx="${n}">
