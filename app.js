@@ -36,7 +36,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=22').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=23').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -656,51 +656,41 @@ function buildFoldHtml(p, idx) {
   const rows = [];
 
   if (p.type === 'transport' && p.subtype === 'flight') {
-    const flightNum   = extractFlightNum(p.name);
     const terminal    = extractTerminal(p.departure_point);
-    const airportName = extractAirportName(p.departure_point);
     const terminalStr = terminal ? `Terminal ${esc(terminal)}` : 'Terminal: Not known';
     const airlineStr  = esc(p.airline || '—');
+    const hasSrc      = p.sources && p.sources.length;
 
-    rows.push(pairRow(lv('Departs', esc(p.departure_time || '—')), lv('Flight', esc(flightNum))));
+    // Row 1: Departs + Ref
+    if (p.booking_reference) {
+      rows.push(pairRow(lv('Departs', esc(p.departure_time || '—')), lv('Ref', esc(p.booking_reference))));
+    } else {
+      rows.push(`<div class="today-fold-row">${lv('Departs', esc(p.departure_time || '—'))}</div>`);
+    }
+
+    // Row 2: Airline + Terminal
     rows.push(pairRow(lv('Airline', airlineStr), `<span class="strip-value">${terminalStr}</span>`));
 
-    if (airportName) {
-      rows.push(`<div class="today-fold-row">${esc(airportName)}</div>`);
-    }
+    // Row 3: Airport name omitted — maps link below already shows it (Fix 3)
+
+    // Row 4: Departure airport geo link
     if (p.lat != null && p.lon != null) {
       const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
       rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">${esc(p.departure_point || 'Departure airport')}</a></div>`);
     }
 
-    const hasSrc = p.sources && p.sources.length;
-    if (p.booking_reference && hasSrc) {
+    // Row 5: No phone for flights
+
+    // Row 6: View doc
+    if (hasSrc) {
       const src = p.sources[0];
       rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
-        `<div class="strip-row">` +
-          `<div class="strip-col">${lv('Booking ref', esc(p.booking_reference))}</div>` +
-          `<div class="strip-col"><span class="today-source-label strip-value">View doc →</span></div>` +
-        `</div>` +
+        `<span class="today-source-label strip-value">View doc →</span>` +
         `<div class="today-source-content" style="display:none"></div>` +
         `</div>`);
-    } else if (p.booking_reference) {
-      rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
-    } else if (hasSrc) {
-      p.sources.forEach(src => {
-        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
-          `<span class="today-source-label">View doc →</span>` +
-          `<div class="today-source-content" style="display:none"></div>` +
-          `</div>`);
-      });
     }
 
-    const passengers = extractPassengers(p.reservation_items);
-    if (passengers.length >= 2) {
-      rows.push(pairRow(`<span class="strip-value">${esc(passengers[0])}</span>`, `<span class="strip-value">${esc(passengers[1])}</span>`));
-    } else if (passengers.length === 1) {
-      rows.push(`<div class="today-fold-row">${esc(passengers[0])}</div>`);
-    }
-
+    // Row 7: Notes
     if (p.special_notes) {
       rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
     }
@@ -708,19 +698,28 @@ function buildFoldHtml(p, idx) {
   } else if (p.type === 'hotel') {
     const ciTime = (IS_WEEKEND_TODAY && p.check_in_time_weekend)  ? p.check_in_time_weekend  : (p.check_in_time  || '—');
     const coTime = (IS_WEEKEND_TODAY && p.check_out_time_weekend) ? p.check_out_time_weekend : (p.check_out_time || '—');
+    const hasSrc = p.sources && p.sources.length;
+    const hasWeb = p.website_url;
 
+    // Row 1: Check-in + Ref
+    if (p.booking_reference) {
+      rows.push(pairRow(lv('Check-in', esc(ciTime)), lv('Ref', esc(p.booking_reference))));
+    } else {
+      rows.push(`<div class="today-fold-row">${lv('Check-in', esc(ciTime))}</div>`);
+    }
+
+    // Row 2: Check-out + Day X of Y
     if (p.check_in_date && p.check_out_date) {
       const x = stayDayOf(p.check_in_date, TODAY);
       const y = stayNights(p.check_in_date, p.check_out_date);
-      rows.push(`<div class="today-fold-banner">Day ${x} of ${y}</div>`);
+      rows.push(pairRow(lv('Check-out', esc(coTime)), `<span class="strip-value">Day ${x} of ${y}</span>`));
+    } else {
+      rows.push(`<div class="today-fold-row">${lv('Check-out', esc(coTime))}</div>`);
     }
 
-    rows.push(pairRow(lv('Check-in', esc(ciTime)), lv('Check-out', esc(coTime))));
+    // Row 3: Hotel name omitted — shown in card header
 
-    if (p.booking_reference) {
-      rows.push(`<div class="today-fold-row"><span class="fold-label">Booking ref</span> ${esc(p.booking_reference)}</div>`);
-    }
-
+    // Row 4: Address geo link
     if (p.address) {
       const geoUri = (p.lat != null && p.lon != null)
         ? `geo:${p.lat},${p.lon}?q=${encodeURIComponent(p.address)}`
@@ -733,13 +732,13 @@ function buildFoldHtml(p, idx) {
       rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
     }
 
+    // Row 5: Phone
     if (p.phone) {
       const telHref = `tel:${p.phone.replace(/[\s-]/g, '')}`;
       rows.push(`<div class="today-fold-row"><a href="${esc(telHref)}">${esc(p.phone)}</a></div>`);
     }
 
-    const hasSrc = p.sources && p.sources.length;
-    const hasWeb = p.website_url;
+    // Row 6: View doc + Hotel website
     if (hasSrc && hasWeb) {
       const src = p.sources[0];
       rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
@@ -750,19 +749,21 @@ function buildFoldHtml(p, idx) {
         `<div class="today-source-content" style="display:none"></div>` +
         `</div>`);
     } else if (hasSrc) {
-      p.sources.forEach(src => {
-        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
-          `<span class="today-source-label">View doc →</span>` +
-          `<div class="today-source-content" style="display:none"></div>` +
-          `</div>`);
-      });
+      const src = p.sources[0];
+      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+        `<span class="today-source-label">View doc →</span>` +
+        `<div class="today-source-content" style="display:none"></div>` +
+        `</div>`);
     } else if (hasWeb) {
       rows.push(`<div class="today-fold-row"><a href="${esc(p.website_url)}" target="_blank" rel="noopener">Hotel website →</a></div>`);
     }
 
+    // Row 7: Notes
     if (p.special_notes) {
       rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
     }
+
+    // Row 8: Extras — laundry, room service, confirmed items
     if (p.laundry) {
       rows.push(`<div class="today-fold-row"><span class="fold-label">🧺 Laundry</span> ${esc(p.laundry)}</div>`);
     }
@@ -775,39 +776,61 @@ function buildFoldHtml(p, idx) {
     }
 
   } else if (p.type === 'activity') {
-    rows.push(`<div class="today-fold-row"><strong>${esc(p.name)}</strong></div>`);
+    const hasSrc = p.sources && p.sources.length;
+    const hasDet = p.details_url;
 
+    // Row 1: Start time + Ref
     if (p.reservation_time && p.booking_reference) {
-      rows.push(pairRow(`<span class="strip-value">${esc(p.reservation_time)}</span>`, `<span class="strip-value">Ref ${esc(p.booking_reference)}</span>`));
+      rows.push(pairRow(lv('Start', esc(p.reservation_time)), lv('Ref', esc(p.booking_reference))));
     } else if (p.reservation_time) {
-      rows.push(`<div class="today-fold-row">${esc(p.reservation_time)}</div>`);
+      rows.push(`<div class="today-fold-row">${lv('Start', esc(p.reservation_time))}</div>`);
     } else if (p.booking_reference) {
-      rows.push(`<div class="today-fold-row">Ref ${esc(p.booking_reference)}</div>`);
+      rows.push(`<div class="today-fold-row">${lv('Ref', esc(p.booking_reference))}</div>`);
     }
 
+    // Row 2: Omitted
+
+    // Row 3: Meeting point plain text
+    if (p.meeting_point) {
+      rows.push(`<div class="today-fold-row">${esc(p.meeting_point)}</div>`);
+    }
+
+    // Row 4: Geo link
     if (p.lat != null && p.lon != null) {
-      const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
-      const addr = p.meeting_point || 'Open in Maps';
-      rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">${esc(addr)}</a></div>`);
+      const q = p.meeting_point ? encodeURIComponent(p.meeting_point) : `${p.lat},${p.lon}`;
+      const geoUri = `geo:${p.lat},${p.lon}?q=${q}`;
+      rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
     }
 
-    if (p.special_notes) {
-      rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
+    // Row 5: Phone (omit if absent)
+    if (p.phone) {
+      const telHref = `tel:${p.phone.replace(/[\s-]/g, '')}`;
+      rows.push(`<div class="today-fold-row"><a href="${esc(telHref)}">${esc(p.phone)}</a></div>`);
     }
-    if (p.details_url) {
+
+    // Row 6: View doc + Details paired
+    if (hasSrc && hasDet) {
+      const src = p.sources[0];
+      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+        `<div class="strip-row">` +
+          `<div class="strip-col"><span class="today-source-label strip-value">View doc →</span></div>` +
+          `<div class="strip-col"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details →</a></div>` +
+        `</div>` +
+        `<div class="today-source-content" style="display:none"></div>` +
+        `</div>`);
+    } else if (hasSrc) {
+      const src = p.sources[0];
+      rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
+        `<span class="today-source-label">View doc →</span>` +
+        `<div class="today-source-content" style="display:none"></div>` +
+        `</div>`);
+    } else if (hasDet) {
       rows.push(`<div class="today-fold-row"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details →</a></div>`);
     }
-    if (p.reservation_items && p.reservation_items.length) {
-      const items = p.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
-      rows.push(`<div class="today-fold-row"><span class="fold-label">Confirmed</span><ol class="today-fold-list">${items}</ol></div>`);
-    }
-    if (p.sources && p.sources.length) {
-      p.sources.forEach(src => {
-        rows.push(`<div class="today-fold-row today-source-row" data-source="${esc(src)}">` +
-          `<span class="today-source-label">View doc →</span>` +
-          `<div class="today-source-content" style="display:none"></div>` +
-          `</div>`);
-      });
+
+    // Row 7: Notes
+    if (p.special_notes) {
+      rows.push(`<div class="today-fold-row"><span class="fold-label">📝 Notes</span> ${esc(p.special_notes)}</div>`);
     }
 
   } else {
