@@ -27,7 +27,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=17').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=19').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -531,6 +531,9 @@ function updateActionBarState() {
 function setupWikiTab() {
   $('wiki-search').addEventListener('input', e => renderWikiList(e.target.value.toLowerCase().trim()));
   $('article-back').addEventListener('click', () => $('wiki-article').classList.remove('open'));
+  $('wiki-capture-btn').addEventListener('click', openCaptureSheet);
+  $('capture-cancel').addEventListener('click', closeCaptureSheet);
+  $('capture-save').addEventListener('click', saveRawCapture);
 }
 
 async function loadWiki() {
@@ -549,7 +552,8 @@ function formatTodayLine(p) {
     const bkfast = p.breakfast_included
       ? (p.breakfast_time ? `breakfast ${p.breakfast_time}` : 'breakfast included')
       : 'breakfast none';
-    return `🏨 ${esc(p.name)} · check-in ${p.check_in_time || '—'} · check-out ${p.check_out_time || '—'} · ${bkfast}`;
+    const ref = p.booking_reference ? ` · ref ${esc(p.booking_reference)}` : '';
+    return `🏨 ${esc(p.name)} · check-in ${p.check_in_time || '—'} · check-out ${p.check_out_time || '—'} · ${bkfast}${ref}`;
   }
   if (p.type === 'transport') {
     const emoji = TRANSPORT_EMOJI[p.subtype] || '🎫';
@@ -569,6 +573,9 @@ function formatTodayLine(p) {
 
 function buildFoldHtml(p, idx) {
   const rows = [];
+  if (p.type === 'hotel' && p.booking_reference) {
+    rows.push(`<div class="today-fold-row"><strong>Booking reference: ${esc(p.booking_reference)}</strong></div>`);
+  }
   if (p.type === 'hotel' && p.laundry) {
     rows.push(`<div class="today-fold-row">🧺 ${esc(p.laundry)}</div>`);
   }
@@ -578,7 +585,9 @@ function buildFoldHtml(p, idx) {
   if (p.type === 'activity' && p.details_url) {
     rows.push(`<div class="today-fold-row"><a href="${esc(p.details_url)}" target="_blank" rel="noopener">Details</a></div>`);
   }
-  if (p.lat !== null && p.lat !== undefined && p.lon !== null && p.lon !== undefined) {
+  if (p.maps_url) {
+    rows.push(`<div class="today-fold-row"><a href="${esc(p.maps_url)}" target="_blank" rel="noopener">Open in Maps →</a></div>`);
+  } else if (p.lat !== null && p.lat !== undefined && p.lon !== null && p.lon !== undefined) {
     const geoUri = `geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}`;
     rows.push(`<div class="today-fold-row"><a href="${esc(geoUri)}" rel="noopener">Open in Maps →</a></div>`);
   }
@@ -740,8 +749,101 @@ function renderWikiList(query) {
 }
 
 function openArticle(page) {
-  $('article-content').textContent = `${page.name}\n\n${page.content}`;
+  const hotelCardEl = $('article-hotel-card');
+  const mapsLinkEl  = $('article-maps-link');
+  const contentEl   = $('article-content');
+
+  if (page.type === 'hotel') {
+    hotelCardEl.innerHTML = buildHotelCard(page);
+    hotelCardEl.style.display = '';
+    mapsLinkEl.hidden = true;
+    contentEl.textContent = '';
+  } else {
+    hotelCardEl.innerHTML = '';
+    hotelCardEl.style.display = 'none';
+    contentEl.textContent = `${page.name}\n\n${page.content}`;
+    if (page.maps_url && ['restaurant', 'activity', 'area'].includes(page.type)) {
+      mapsLinkEl.innerHTML = `<a href="${esc(page.maps_url)}" target="_blank" rel="noopener">Open in Maps →</a>`;
+      mapsLinkEl.hidden = false;
+    } else {
+      mapsLinkEl.innerHTML = '';
+      mapsLinkEl.hidden = true;
+    }
+  }
   $('wiki-article').classList.add('open');
+}
+
+function buildHotelCard(page) {
+  const parts = [];
+
+  parts.push(`<h2 class="hotel-card-name">${esc(page.name)}</h2>`);
+
+  if (page.booking_reference) {
+    parts.push(
+      `<div class="hotel-card-section">` +
+        `<div class="hotel-card-label">Booking ref</div>` +
+        `<div class="hotel-card-booking-ref">${esc(page.booking_reference)}</div>` +
+      `</div>`
+    );
+  }
+
+  const stayRows = [];
+  if (page.check_in_date || page.check_in_time) {
+    const val = [page.check_in_date ? fmtDate(page.check_in_date) : null, page.check_in_time].filter(Boolean).join(' · ');
+    stayRows.push(`<div class="hotel-stay-row"><span class="hotel-stay-key">Check-in</span><span>${esc(val)}</span></div>`);
+  }
+  if (page.check_out_date || page.check_out_time) {
+    const val = [page.check_out_date ? fmtDate(page.check_out_date) : null, page.check_out_time].filter(Boolean).join(' · ');
+    stayRows.push(`<div class="hotel-stay-row"><span class="hotel-stay-key">Check-out</span><span>${esc(val)}</span></div>`);
+  }
+  if (page.breakfast_included !== null) {
+    const val = page.breakfast_included
+      ? `Included${page.breakfast_time ? ` · ${page.breakfast_time}` : ''}`
+      : 'Not included';
+    stayRows.push(`<div class="hotel-stay-row"><span class="hotel-stay-key">Breakfast</span><span>${esc(val)}</span></div>`);
+  }
+  if (stayRows.length) {
+    parts.push(`<div class="hotel-card-section">${stayRows.join('')}</div>`);
+  }
+
+  if (page.reservation_items && page.reservation_items.length) {
+    const items = page.reservation_items.map(item => `<li>${esc(item)}</li>`).join('');
+    parts.push(
+      `<div class="hotel-card-section">` +
+        `<div class="hotel-card-label">Confirmed</div>` +
+        `<ul class="hotel-card-list">${items}</ul>` +
+      `</div>`
+    );
+  }
+
+  if (page.special_notes) {
+    parts.push(
+      `<div class="hotel-card-section">` +
+        `<div class="hotel-card-label">Notes</div>` +
+        `<div class="hotel-card-notes">${esc(page.special_notes)}</div>` +
+      `</div>`
+    );
+  }
+
+  const links = [];
+  if (page.maps_url) {
+    links.push(`<a href="${esc(page.maps_url)}" target="_blank" rel="noopener" class="hotel-card-link">Open in Maps →</a>`);
+  } else if (page.lat != null && page.lon != null) {
+    const geoUri = `geo:${page.lat},${page.lon}?q=${page.lat},${page.lon}`;
+    links.push(`<a href="${esc(geoUri)}" rel="noopener" class="hotel-card-link">Open in Maps →</a>`);
+  }
+  if (page.room_service_url) {
+    links.push(`<a href="${esc(page.room_service_url)}" target="_blank" rel="noopener" class="hotel-card-link">Hotel website →</a>`);
+  }
+  if (links.length) {
+    parts.push(`<div class="hotel-card-links">${links.join('')}</div>`);
+  }
+
+  if (page.content) {
+    parts.push(`<hr class="hotel-card-divider"><div class="hotel-card-body">${esc(page.content)}</div>`);
+  }
+
+  return parts.join('');
 }
 
 // ---- Tabs ----
@@ -837,6 +939,83 @@ function hidePendingDraft() {
   $('pending-draft').style.display = 'none';
   $('add-bar').style.display = '';       // reverts to flex via .add-bar CSS
   updateActionBarState();                // re-evaluates hint and button states
+}
+
+// ---- Raw capture ----
+
+function openCaptureSheet() {
+  $('capture-text').value = '';
+  $('capture-status').style.display = 'none';
+  $('capture-save').disabled = false;
+  $('capture-save').textContent = 'Save';
+  show('raw-capture-form');
+  $('capture-text').focus();
+}
+
+function closeCaptureSheet() {
+  hide('raw-capture-form');
+  $('capture-text').value = '';
+  $('capture-status').style.display = 'none';
+}
+
+async function saveRawCapture() {
+  const text = $('capture-text').value;
+  if (!text.trim()) return;
+
+  if (!s.vault) {
+    const st = $('capture-status');
+    st.textContent = 'Vault not authorized — tap Authorize first';
+    st.style.color = '#dc2626';
+    st.style.display = 'block';
+    return;
+  }
+
+  const btn = $('capture-save');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  let gps = null;
+  if (navigator.geolocation) {
+    gps = await new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        ()  => resolve(null),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+      );
+    });
+  }
+
+  const now = new Date();
+  const datePart = now.toISOString().slice(0, 10);
+  const hh = pad(now.getHours()), mm = pad(now.getMinutes()), ss = pad(now.getSeconds());
+  const datetime = `${datePart} ${hh}:${mm}`;
+  const fileBase = `${datePart}_${hh}-${mm}-${ss}_raw`;
+
+  const geoLine = gps ? `\ngeo: ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
+  const content = `# Raw capture — ${datetime}\n\n${text.trim()}\n\n---\ncaptured: ${datetime}${geoLine}\n`;
+
+  let filename = `${fileBase}.md`;
+  let n = 2;
+  while (await vault.rawFileExists(s.vault, filename)) {
+    filename = `${fileBase}_${n++}.md`;
+  }
+
+  try {
+    await vault.saveRawEntry(s.vault, filename, content);
+    const st = $('capture-status');
+    st.textContent = 'Saved to raw ✓';
+    st.style.color = '#166534';
+    st.style.display = 'block';
+    setTimeout(closeCaptureSheet, 2000);
+  } catch (e) {
+    console.error('Raw capture failed:', e);
+    btn.disabled = false;
+    btn.textContent = 'Save';
+    const st = $('capture-status');
+    st.textContent = 'Save failed — try again';
+    st.style.color = '#dc2626';
+    st.style.display = 'block';
+  }
 }
 
 // ---- Helpers ----

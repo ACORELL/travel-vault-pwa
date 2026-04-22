@@ -137,6 +137,10 @@
     /* ---- Wiki tab ---- */
     .wiki-search { width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: var(--surface); margin-bottom: 16px; -webkit-appearance: none; }
     .wiki-search:focus { outline: none; border-color: #1a1a1a; background: #fff; }
+    .wiki-cap-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+    .wiki-cap-btn { padding: 5px 12px; border: 1.5px solid var(--border); border-radius: 8px; background: none; font-size: 18px; font-weight: 400; color: var(--muted); cursor: pointer; font-family: inherit; line-height: 1; }
+    .wiki-cap-btn:active { background: var(--surface); }
+    .capture-status { font-size: 13px; margin-top: 4px; }
 
     /* ---- Today strip ---- */
     #today-strip:not(:empty) { margin-bottom: 14px; }
@@ -172,7 +176,24 @@
     #wiki-article { position: fixed; inset: 0; z-index: 50; background: #fff; overflow-y: auto; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top)); display: none; }
     #wiki-article.open { display: block; }
     #article-back { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 0 0 16px; font-family: inherit; }
+    #article-maps-link { padding: 8px 0 4px; font-size: 0.9em; }
+    #article-maps-link a { color: #1565c0; text-decoration: none; }
     #article-content { font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+
+    /* Hotel card */
+    .hotel-card-name { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+    .hotel-card-section { margin-bottom: 14px; }
+    .hotel-card-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 4px; }
+    .hotel-card-booking-ref { font-size: 28px; font-weight: 700; color: #1565c0; letter-spacing: .02em; }
+    .hotel-stay-row { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .hotel-stay-row:last-child { border-bottom: none; }
+    .hotel-stay-key { color: var(--muted); flex-shrink: 0; padding-right: 12px; }
+    .hotel-card-list { padding-left: 18px; font-size: 14px; line-height: 1.8; }
+    .hotel-card-notes { font-size: 14px; color: #555; line-height: 1.5; }
+    .hotel-card-links { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .hotel-card-link { font-size: 14px; color: #1565c0; text-decoration: none; font-weight: 500; }
+    .hotel-card-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+    .hotel-card-body { font-size: 13px; color: var(--muted); line-height: 1.7; white-space: pre-wrap; }
 
     /* ---- Shared ---- */
     .empty-state { text-align: center; color: var(--muted); font-size: 14px; padding: 40px 0; }
@@ -250,6 +271,9 @@
 
     <!-- Wiki tab -->
     <div id="tab-wiki" class="tab-panel">
+      <div class="wiki-cap-row">
+        <button id="wiki-capture-btn" class="wiki-cap-btn" title="Quick raw capture">+</button>
+      </div>
       <div id="today-strip"></div>
       <input id="wiki-search" class="wiki-search" type="text" placeholder="Search...">
       <div id="wiki-list"></div>
@@ -295,9 +319,24 @@
   </div>
 </div>
 
+<!-- Raw capture form -->
+<div id="raw-capture-form" class="fsform hidden">
+  <div class="fshdr">
+    <button id="capture-cancel">Cancel</button>
+    <h3>Raw Capture</h3>
+    <button id="capture-save" class="confirm">Save</button>
+  </div>
+  <div class="fsbody">
+    <textarea id="capture-text" rows="8" placeholder="Place name, URL, notes — anything…"></textarea>
+    <p id="capture-status" class="capture-status" style="display:none"></p>
+  </div>
+</div>
+
 <!-- Wiki article -->
 <div id="wiki-article">
   <button id="article-back">← Back</button>
+  <div id="article-hotel-card" style="display:none"></div>
+  <div id="article-maps-link" hidden></div>
   <div id="article-content"></div>
 </div>
 

@@ -132,6 +132,13 @@ export async function saveRawEntry(vault, filename, content) {
   await writeText(await dir(vault, 'wiki', 'raw'), filename, content);
 }
 
+export async function rawFileExists(vault, filename) {
+  try {
+    await (await dir(vault, 'wiki', 'raw')).getFileHandle(filename);
+    return true;
+  } catch { return false; }
+}
+
 export async function loadTodayRaw(vault, date) {
   const rawDir  = await dir(vault, 'wiki', 'raw');
   const entries = [];
@@ -241,11 +248,12 @@ function parsePage(text, type, slug) {
     tags,
     content: m[2].trim(),
     // Hotel fields
+    booking_reference: fm.booking_reference || null,
     check_in_date:    fm.check_in_date  || null,
     check_out_date:   fm.check_out_date || null,
     check_in_time:    fm.check_in_time  || null,
     check_out_time:   fm.check_out_time || null,
-    breakfast_included: fm.breakfast_included === true,
+    breakfast_included: fm.breakfast_included ?? null,
     breakfast_time:   fm.breakfast_time  || null,
     laundry:          fm.laundry         || null,
     room_service_url: fm.room_service_url || null,
@@ -266,5 +274,6 @@ function parsePage(text, type, slug) {
     reservation_items: Array.isArray(fm.reservation_items) ? fm.reservation_items : [],
     sources: Array.isArray(fm.sources) ? fm.sources : (fm.sources ? [fm.sources] : (fm.source ? [fm.source] : [])),
     lat, lon,
+    maps_url: fm.maps_url || null,
   };
 }
