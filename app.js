@@ -36,7 +36,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=25').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=26').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -632,8 +632,11 @@ function formatTomorrowLine(p) {
     return `${emoji} ${esc(p.name)} · ${esc(p.departure_time || '—')}`;
   }
   if (p.type === 'hotel') {
-    const suffix = (p.check_in_date === TOMORROW && p.check_in_time) ? ` · Check-in ${esc(p.check_in_time)}` : '';
-    return `🏨 ${esc(p.name)}${suffix}`;
+    if (p.check_in_date === TOMORROW && p.check_in_time)
+      return `🏨 ${esc(p.name)} · ${esc(p.check_in_time)}`;
+    if (p.check_out_date === TOMORROW && p.check_out_time)
+      return `🏨 ${esc(p.name)} · ${esc(p.check_out_time)}`;
+    return `🏨 ${esc(p.name)}`;
   }
   if (p.type === 'activity') {
     return `🎟️ ${esc(p.name)} · ${esc(p.reservation_time || '—')}`;
@@ -816,6 +819,35 @@ function primaryTime(p) {
   return '00:00';
 }
 
+function tomorrowPrimaryTime(p) {
+  if (p.type === 'hotel') {
+    if (p.check_in_date === TOMORROW)  return p.check_in_time  || '00:00';
+    if (p.check_out_date === TOMORROW) return p.check_out_time || '00:00';
+    return '00:00';
+  }
+  return primaryTime(p);
+}
+
+function isPast(p) {
+  const t = primaryTime(p);
+  if (!t || t === '00:00') return false;
+  const now = new Date();
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m <= now.getHours() * 60 + now.getMinutes();
+}
+
+function formatCountdown(timeStr) {
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const [h, m] = (timeStr || '').split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  const diff = h * 60 + m - nowMins;
+  if (diff <= 0) return null;
+  const hrs = Math.floor(diff / 60);
+  const mins = diff % 60;
+  return hrs > 0 ? `In ${hrs}h ${mins}m` : `In ${mins}m`;
+}
+
 function findNextUpcoming(items) {
   const now = new Date();
   const nowMins = now.getHours() * 60 + now.getMinutes();
@@ -848,7 +880,7 @@ function renderTodayStrip() {
   if (!todayItems.length && !tomorrowItems.length) { strip.innerHTML = ''; return; }
 
   todayItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
-  tomorrowItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
+  tomorrowItems.sort((a, b) => tomorrowPrimaryTime(a).localeCompare(tomorrowPrimaryTime(b)));
 
   const upcomingItem = findNextUpcoming(todayItems);
 
@@ -861,13 +893,19 @@ function renderTodayStrip() {
   for (const type of STRIP_CATEGORY_ORDER) {
     if (!grouped[type]) continue;
     html += `<div class="today-category-header">${STRIP_CATEGORY_LABEL[type]}</div>`;
-    for (const p of grouped[type]) {
+    const active = grouped[type].filter(p => !isPast(p));
+    const past   = grouped[type].filter(p =>  isPast(p));
+    for (const p of [...active, ...past]) {
       const foldHtml = buildFoldHtml(p, n);
-      const catClass = STRIP_CATEGORY_CLASS[type] || '';
+      const catClass     = STRIP_CATEGORY_CLASS[type] || '';
       const upcomingClass = p === upcomingItem ? ' today-item-upcoming' : '';
-      html += `<div class="today-item ${catClass}${upcomingClass}">
+      const pastClass     = isPast(p) ? ' today-item-past' : '';
+      const countdownStr  = p === upcomingItem ? formatCountdown(primaryTime(p)) : null;
+      const countdownHtml = countdownStr ? `<span class="today-item-countdown">${countdownStr}</span>` : '';
+      html += `<div class="today-item ${catClass}${upcomingClass}${pastClass}">
         <div class="today-item-row" data-idx="${n}">
           <span class="today-item-line">${formatTodayLine(p)}</span>
+          ${countdownHtml}
           ${foldHtml ? '<span class="today-item-arrow">›</span>' : ''}
         </div>
         ${foldHtml ? `<div class="today-fold" data-idx="${n}">${foldHtml}</div>` : ''}
@@ -895,6 +933,8 @@ function renderTodayStrip() {
       fold.classList.toggle('open', opening);
       const arrow = row.querySelector('.today-item-arrow');
       if (arrow) arrow.textContent = opening ? '∨' : '›';
+      const item = row.closest('.today-item');
+      if (item) item.classList.toggle('today-item-expanded', opening);
       if (opening) loadTodaySourceFile(fold);
     });
   });
