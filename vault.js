@@ -273,6 +273,7 @@ function parsePage(text, type, slug) {
     // Activity fields
     reservation_date: fm.reservation_date || null,
     reservation_time: fm.reservation_time || null,
+    duration:         fm.duration         || null,
     meeting_point:    fm.meeting_point    || null,
     details_url:      fm.details_url      || null,
     // Shared enriched fields

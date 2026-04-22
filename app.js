@@ -36,7 +36,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=26').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=27').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -575,6 +575,79 @@ function stayNights(checkInDate, checkOutDate) {
   return Math.floor(ms / 86400000);
 }
 
+// ---- Duration helpers ----
+function parseDurationToMins(dur) {
+  if (!dur) return null;
+  const parts = String(dur).split(':').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  const [dd, hh, mm] = parts;
+  return dd * 24 * 60 + hh * 60 + mm;
+}
+function activityEndMins(p) {
+  if (!p.reservation_time || !p.duration) return null;
+  const [h, m] = p.reservation_time.split(':').map(Number);
+  const dur = parseDurationToMins(p.duration);
+  if (dur == null) return null;
+  return h * 60 + m + dur;
+}
+function activityEndTimeStr(p) {
+  const end = activityEndMins(p);
+  if (end == null) return null;
+  const h = Math.floor(end / 60) % 24;
+  const m = end % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// ---- Item state ----
+// Returns 'upcoming' | 'active' | 'spent' for the current moment
+function itemState(p) {
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+
+  if (p.type === 'transport') {
+    const t = p.departure_time;
+    if (!t) return 'upcoming';
+    const [h, m] = t.split(':').map(Number);
+    return nowMins >= h * 60 + m ? 'spent' : 'upcoming';
+  }
+
+  if (p.type === 'activity') {
+    const t = p.reservation_time;
+    if (!t) return 'upcoming';
+    const [h, m] = t.split(':').map(Number);
+    const startMins = h * 60 + m;
+    if (nowMins < startMins) return 'upcoming';
+    const endMins = activityEndMins(p);
+    if (endMins != null && nowMins < endMins) return 'active';
+    return 'spent';
+  }
+
+  if (p.type === 'hotel') {
+    const isCheckInDay  = p.check_in_date  === TODAY;
+    const isCheckOutDay = p.check_out_date === TODAY;
+
+    if (isCheckInDay) {
+      const ciTime = (IS_WEEKEND_TODAY && p.check_in_time_weekend) ? p.check_in_time_weekend : p.check_in_time;
+      if (ciTime) {
+        const [h, m] = ciTime.split(':').map(Number);
+        if (nowMins < h * 60 + m) return 'upcoming';
+      }
+    }
+
+    if (isCheckOutDay) {
+      const coTime = (IS_WEEKEND_TODAY && p.check_out_time_weekend) ? p.check_out_time_weekend : p.check_out_time;
+      if (coTime) {
+        const [h, m] = coTime.split(':').map(Number);
+        if (nowMins >= h * 60 + m) return 'spent';
+      }
+    }
+
+    return 'active';
+  }
+
+  return 'upcoming';
+}
+
 // ---- Flight detail helpers ----
 function extractFlightNum(name) {
   const m = name.match(/\bFlight\s+([A-Z]{2,3}\s*\d+)/i) || name.match(/\b([A-Z]{2,3}\s*\d{2,4})\b/);
@@ -600,10 +673,18 @@ function extractPassengers(items) {
 
 function formatTodayLine(p) {
   if (p.type === 'hotel') {
+    const state = itemState(p);
+    if (state === 'upcoming') {
+      const ciTime = (IS_WEEKEND_TODAY && p.check_in_time_weekend) ? p.check_in_time_weekend : (p.check_in_time || '—');
+      return `🏨 ${esc(p.name)} · Check-in ${esc(ciTime)}`;
+    }
+    if (state === 'active' && p.check_out_date === TODAY) {
+      const coTime = (IS_WEEKEND_TODAY && p.check_out_time_weekend) ? p.check_out_time_weekend : (p.check_out_time || '—');
+      return `🏨 ${esc(p.name)} · Check-out ${esc(coTime)}`;
+    }
     const x = stayDayOf(p.check_in_date, TODAY);
     const y = stayNights(p.check_in_date, p.check_out_date);
-    const ciTime = (IS_WEEKEND_TODAY && p.check_in_time_weekend) ? p.check_in_time_weekend : (p.check_in_time || '—');
-    return `🏨 ${esc(p.name)} · Day ${x} of ${y} · Check-in ${esc(ciTime)}`;
+    return `🏨 ${esc(p.name)} · Day ${x} of ${y}`;
   }
   if (p.type === 'transport' && p.subtype === 'flight') {
     const flightNum = extractFlightNum(p.name);
@@ -616,6 +697,10 @@ function formatTodayLine(p) {
     return `${emoji} ${esc(p.name)} · ${esc(p.departure_point || '—')} ${esc(p.departure_time || '—')} · ${esc(p.arrival_point || '—')} ${esc(p.arrival_time || '—')}`;
   }
   if (p.type === 'activity') {
+    if (itemState(p) === 'active') {
+      const endStr = activityEndTimeStr(p);
+      return endStr ? `🎟️ ${esc(p.name)} · Ending at ${endStr}` : `🎟️ ${esc(p.name)}`;
+    }
     const parts = [`🎟️ ${esc(p.name)}`];
     if (p.reservation_time) parts.push(esc(p.reservation_time));
     return parts.join(' · ');
@@ -635,11 +720,14 @@ function formatTomorrowLine(p) {
     if (p.check_in_date === TOMORROW && p.check_in_time)
       return `🏨 ${esc(p.name)} · ${esc(p.check_in_time)}`;
     if (p.check_out_date === TOMORROW && p.check_out_time)
-      return `🏨 ${esc(p.name)} · ${esc(p.check_out_time)}`;
+      return `🏨 ${esc(p.name)} · Check-out ${esc(p.check_out_time)}`;
     return `🏨 ${esc(p.name)}`;
   }
   if (p.type === 'activity') {
-    return `🎟️ ${esc(p.name)} · ${esc(p.reservation_time || '—')}`;
+    const parts = [`🎟️ ${esc(p.name)}`, esc(p.reservation_time || '—')];
+    const endStr = activityEndTimeStr(p);
+    if (endStr) parts.push(`Ending at ${endStr}`);
+    return parts.join(' · ');
   }
   return esc(p.name);
 }
@@ -828,13 +916,7 @@ function tomorrowPrimaryTime(p) {
   return primaryTime(p);
 }
 
-function isPast(p) {
-  const t = primaryTime(p);
-  if (!t || t === '00:00') return false;
-  const now = new Date();
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m <= now.getHours() * 60 + now.getMinutes();
-}
+function isPast(p) { return itemState(p) === 'spent'; }
 
 function formatCountdown(timeStr) {
   const now = new Date();
@@ -846,20 +928,6 @@ function formatCountdown(timeStr) {
   const hrs = Math.floor(diff / 60);
   const mins = diff % 60;
   return hrs > 0 ? `In ${hrs}h ${mins}m` : `In ${mins}m`;
-}
-
-function findNextUpcoming(items) {
-  const now = new Date();
-  const nowMins = now.getHours() * 60 + now.getMinutes();
-  let best = null, bestDiff = Infinity;
-  for (const p of items) {
-    const t = primaryTime(p);
-    if (!t || t === '00:00') continue;
-    const [h, m] = t.split(':').map(Number);
-    const diff = h * 60 + m - nowMins;
-    if (diff > 0 && diff < bestDiff) { bestDiff = diff; best = p; }
-  }
-  return best;
 }
 
 function renderTodayStrip() {
@@ -874,15 +942,22 @@ function renderTodayStrip() {
     return false;
   }
 
-  const todayItems    = s.wikiPages.filter(p => matchesDate(p, TODAY));
-  const tomorrowItems = s.wikiPages.filter(p => matchesDate(p, TOMORROW));
+  const todayItems = s.wikiPages.filter(p => matchesDate(p, TODAY));
+
+  // Hotel checkout-day entries only surface in tomorrow strip from 18:00
+  const nowHour = new Date().getHours();
+  const tomorrowItems = s.wikiPages.filter(p => {
+    if (!matchesDate(p, TOMORROW)) return false;
+    if (p.type === 'hotel' && p.check_out_date === TOMORROW && p.check_in_date !== TOMORROW) {
+      return nowHour >= 18;
+    }
+    return true;
+  });
 
   if (!todayItems.length && !tomorrowItems.length) { strip.innerHTML = ''; return; }
 
   todayItems.sort((a, b) => primaryTime(a).localeCompare(primaryTime(b)));
   tomorrowItems.sort((a, b) => tomorrowPrimaryTime(a).localeCompare(tomorrowPrimaryTime(b)));
-
-  const upcomingItem = findNextUpcoming(todayItems);
 
   const grouped = {};
   for (const p of todayItems) { (grouped[p.type] = grouped[p.type] || []).push(p); }
@@ -893,16 +968,19 @@ function renderTodayStrip() {
   for (const type of STRIP_CATEGORY_ORDER) {
     if (!grouped[type]) continue;
     html += `<div class="today-category-header">${STRIP_CATEGORY_LABEL[type]}</div>`;
-    const active = grouped[type].filter(p => !isPast(p));
-    const past   = grouped[type].filter(p =>  isPast(p));
-    for (const p of [...active, ...past]) {
+    const upcomingGroup = grouped[type].filter(p => itemState(p) === 'upcoming');
+    const activeGroup   = grouped[type].filter(p => itemState(p) === 'active');
+    const spentGroup    = grouped[type].filter(p => itemState(p) === 'spent');
+    for (const p of [...upcomingGroup, ...activeGroup, ...spentGroup]) {
+      const state = itemState(p);
       const foldHtml = buildFoldHtml(p, n);
-      const catClass     = STRIP_CATEGORY_CLASS[type] || '';
-      const upcomingClass = p === upcomingItem ? ' today-item-upcoming' : '';
-      const pastClass     = isPast(p) ? ' today-item-past' : '';
-      const countdownStr  = p === upcomingItem ? formatCountdown(primaryTime(p)) : null;
+      const catClass = STRIP_CATEGORY_CLASS[type] || '';
+      const stateClass = state === 'upcoming' ? ' today-item-upcoming'
+                       : state === 'spent'    ? ' today-item-past'
+                       : '';
+      const countdownStr  = state === 'upcoming' ? formatCountdown(primaryTime(p)) : null;
       const countdownHtml = countdownStr ? `<span class="today-item-countdown">${countdownStr}</span>` : '';
-      html += `<div class="today-item ${catClass}${upcomingClass}${pastClass}">
+      html += `<div class="today-item ${catClass}${stateClass}">
         <div class="today-item-row" data-idx="${n}">
           <span class="today-item-line">${formatTodayLine(p)}</span>
           ${countdownHtml}
