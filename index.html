@@ -226,6 +226,29 @@
     .hotel-card-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
     .hotel-card-body { font-size: 13px; color: var(--muted); line-height: 1.7; white-space: pre-wrap; }
 
+    /* ---- Settings overlay ---- */
+    #settings-overlay { z-index: 110; align-items: stretch; justify-content: stretch; background: #fff; }
+    #settings-overlay .settings-card { background: #fff; width: 100%; height: 100%; padding: calc(env(safe-area-inset-top) + 16px) 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; max-width: 520px; margin: 0 auto; text-align: left; }
+    .settings-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .settings-hdr h2 { font-size: 18px; font-weight: 600; }
+    #settings-close { background: none; border: none; font-size: 22px; color: var(--muted); cursor: pointer; padding: 4px 8px; font-family: inherit; line-height: 1; }
+    .settings-field { display: flex; flex-direction: column; gap: 4px; }
+    .settings-field label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .settings-field input { padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 14px; font-family: inherit; background: #fff; -webkit-appearance: none; }
+    .settings-field input:focus { outline: none; border-color: #1a1a1a; }
+    .settings-field-hint { font-size: 11px; color: var(--muted); }
+    .settings-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .settings-actions button { padding: 12px; font-size: 14px; font-family: inherit; border-radius: 8px; cursor: pointer; font-weight: 500; }
+    #settings-save { background: #1a1a1a; color: #fff; border: none; }
+    #settings-test { background: none; border: 1.5px solid var(--border); color: #1a1a1a; }
+    #settings-clear { background: none; border: 1.5px solid #fde68a; color: #92400e; }
+    #settings-reset-all { background: none; border: 1.5px solid #fecaca; color: #991b1b; }
+    .settings-status { font-size: 13px; padding: 8px 10px; border-radius: 6px; display: none; }
+    .settings-status-ok    { background: #dcfce7; color: #166534; }
+    .settings-status-error { background: #fee2e2; color: #991b1b; }
+    #header-settings-btn { background: none; border: none; color: #fff; opacity: .7; padding: 4px 8px; margin-left: 4px; cursor: pointer; font-family: inherit; font-size: 16px; line-height: 1; }
+    #header-settings-btn:active { opacity: 1; }
+
     /* ---- Shared ---- */
     .empty-state { text-align: center; color: var(--muted); font-size: 14px; padding: 40px 0; }
   </style>
@@ -264,6 +287,7 @@
     <div class="hdr-right">
       <span id="author-label"></span>
       <span class="sync-dot offline" id="sync-dot" title="offline"></span>
+      <button id="header-settings-btn" title="Settings" aria-label="Settings">⚙</button>
     </div>
   </header>
 
@@ -372,6 +396,46 @@
 </div>
 
 <input type="file" id="photo-input" accept="image/*" style="display:none">
+
+<!-- Settings overlay -->
+<div id="settings-overlay" class="overlay hidden">
+  <div class="settings-card">
+    <div class="settings-hdr">
+      <h2>Settings</h2>
+      <button id="settings-close" aria-label="Close">✕</button>
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-pat">GitHub PAT</label>
+      <input id="settings-pat" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      <span class="settings-field-hint">Fine-grained token, Contents read+write on the data repo only</span>
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-repo">Data repo</label>
+      <input id="settings-repo" type="text" autocomplete="off" spellcheck="false" placeholder="owner/repo">
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-worker">Worker URL</label>
+      <input id="settings-worker" type="url" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-author">Author</label>
+      <input id="settings-author" type="text" maxlength="1" autocomplete="off" spellcheck="false" placeholder="N or A">
+    </div>
+
+    <p id="settings-status" class="settings-status" style="display:none"></p>
+
+    <div class="settings-actions">
+      <button id="settings-save">Save</button>
+      <button id="settings-test">Test connection</button>
+      <button id="settings-clear">Clear PAT &amp; queue</button>
+      <button id="settings-reset-all">Wipe all settings</button>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="app.js"></script>
 </body>

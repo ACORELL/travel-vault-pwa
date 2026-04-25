@@ -6,14 +6,18 @@
 // After bumping: git commit, push, done. The SW activate handler cleans up
 // all old cache entries automatically.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = 'tv-phone-v27';
+const CACHE = 'tv-phone-v28';
 
 // DEV_MODE: set true to bypass the SW cache entirely while iterating locally.
 // Every request goes straight to the network — no manual cache-clear needed.
 // IMPORTANT: must be false before pushing to production.
 const DEV_MODE = false;
 
-const SHELL = ['./', './index.html', './app.js', './db.js', './vault.js', './exif.js', './manifest.json'];
+const SHELL = [
+  './', './index.html', './app.js', './db.js', './vault.js', './exif.js', './manifest.json',
+  './services/settings.js', './services/github.js', './services/queue.js',
+  './settings/settings-ui.js',
+];
 
 self.addEventListener('install', e => {
   e.waitUntil(

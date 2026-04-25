@@ -1,5 +1,8 @@
 import { saveVaultHandle, getVaultHandle, enqueueLogEntry, getLogQueue, clearLogKeys } from './db.js';
 import * as vault from './vault.js';
+import * as settingsUi from './settings/settings-ui.js';
+import { putFile, GitHubAuthError } from './services/github.js';
+import * as queue from './services/queue.js';
 
 // ---- Constants ----
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -36,7 +39,7 @@ const s = {
 // ---- Boot ----
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=27').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=28').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -118,6 +121,7 @@ async function startApp(handle) {
   setupTabs();
   setupLogTab();
   setupWikiTab();
+  settingsUi.init();
 
   await loadAvailableDays();
   await loadLog();
@@ -1322,14 +1326,6 @@ async function saveRawCapture() {
   const text = $('capture-text').value;
   if (!text.trim()) return;
 
-  if (!s.vault) {
-    const st = $('capture-status');
-    st.textContent = 'Vault not authorized — tap Authorize first';
-    st.style.color = '#dc2626';
-    st.style.display = 'block';
-    return;
-  }
-
   const btn = $('capture-save');
   btn.disabled = true;
   btn.textContent = 'Saving…';
@@ -1349,32 +1345,44 @@ async function saveRawCapture() {
   const datePart = now.toISOString().slice(0, 10);
   const hh = pad(now.getHours()), mm = pad(now.getMinutes()), ss = pad(now.getSeconds());
   const datetime = `${datePart} ${hh}:${mm}`;
-  const fileBase = `${datePart}_${hh}-${mm}-${ss}_raw`;
+  const filename = `${datePart}_${hh}-${mm}-${ss}_raw.md`;
+  const path = `wiki/raw/${filename}`;
 
   const geoLine = gps ? `\ngeo: ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
   const content = `# Raw capture — ${datetime}\n\n${text.trim()}\n\n---\ncaptured: ${datetime}${geoLine}\n`;
+  const message = `Raw capture ${datetime}`;
 
-  let filename = `${fileBase}.md`;
-  let n = 2;
-  while (await vault.rawFileExists(s.vault, filename)) {
-    filename = `${fileBase}_${n++}.md`;
-  }
-
+  const st = $('capture-status');
   try {
-    await vault.saveRawEntry(s.vault, filename, content);
-    const st = $('capture-status');
+    await putFile(path, content, message);
+    await queue.flush();
     st.textContent = 'Saved to raw ✓';
     st.style.color = '#166534';
     st.style.display = 'block';
     setTimeout(closeCaptureSheet, 2000);
   } catch (e) {
-    console.error('Raw capture failed:', e);
-    btn.disabled = false;
-    btn.textContent = 'Save';
-    const st = $('capture-status');
-    st.textContent = 'Save failed — try again';
-    st.style.color = '#dc2626';
-    st.style.display = 'block';
+    if (e instanceof GitHubAuthError) {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+      closeCaptureSheet();
+      settingsUi.openSettings();
+      return;
+    }
+    // Network or unknown error — queue locally and confirm.
+    try {
+      await queue.enqueue({ path, content, message });
+      st.textContent = 'Saved offline ✓';
+      st.style.color = '#92400e';
+      st.style.display = 'block';
+      setTimeout(closeCaptureSheet, 2000);
+    } catch (qe) {
+      console.error('Raw capture + queue both failed:', e, qe);
+      btn.disabled = false;
+      btn.textContent = 'Save';
+      st.textContent = 'Save failed — try again';
+      st.style.color = '#dc2626';
+      st.style.display = 'block';
+    }
   }
 }
 
