@@ -43,7 +43,7 @@ const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
 
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=31').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=32').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -78,6 +78,27 @@ async function bootApp() {
   show('app');
   startApp(saved);
 }
+
+// Best-effort drain of the offline queue. Called from: boot, 'online' event,
+// settings save, settings test pass, and after any successful capture PUT.
+// All gates are inside this function so callers can fire it blindly.
+async function tryFlush() {
+  if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO)) return;
+  if (!navigator.onLine) return;
+  try {
+    if ((await queue.count()) === 0) return;
+  } catch { return; }
+  setSyncStatus('syncing');
+  try {
+    const { failed } = await queue.flush();
+    setSyncStatus(failed === 0 ? 'synced' : 'offline');
+  } catch {
+    setSyncStatus('offline');
+  }
+}
+
+// Settings dispatches this after Save and after Test connection passes.
+window.addEventListener('try-flush', tryFlush);
 
 async function resetApp() {
   localStorage.clear();
@@ -159,6 +180,7 @@ async function startApp(handle) {
   } else if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
     // No FSA vault but GitHub is configured — green if online, red if not.
     setSyncStatus(navigator.onLine ? 'synced' : 'offline');
+    tryFlush();
   }
 }
 
@@ -170,7 +192,10 @@ window.addEventListener('sync-status', e => setSyncStatus(e.detail));
 window.addEventListener('offline', () => setSyncStatus('offline'));
 window.addEventListener('online',  () => {
   if (s.vault) return; // FSA-driven status takes priority when a vault is connected
-  if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) setSyncStatus('synced');
+  if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
+    setSyncStatus('synced');
+    tryFlush();
+  }
 });
 
 function showVaultBanner(mode) {

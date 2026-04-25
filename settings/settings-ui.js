@@ -56,6 +56,7 @@ async function testConnection() {
     await getFile('trip.md');
     setStatus('Connected ✓', 'ok');
     window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
+    window.dispatchEvent(new CustomEvent('try-flush'));
   } catch (e) {
     if (e instanceof GitHubAuthError) {
       setStatus('Auth failed — check PAT and repo', 'error');
@@ -64,6 +65,7 @@ async function testConnection() {
       // Auth succeeded — repo is reachable; trip.md just isn't there.
       setStatus('Connected, but trip.md not found in repo', 'error');
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
+      window.dispatchEvent(new CustomEvent('try-flush'));
     } else {
       setStatus('Network error — check Worker URL or connectivity', 'error');
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
@@ -90,7 +92,12 @@ async function resetAll() {
 export function init() {
   $('header-settings-btn').addEventListener('click', openSettings);
   $('settings-close').addEventListener('click', () => { saveInputs(); closeSettings(); });
-  $('settings-save').addEventListener('click',  () => { saveInputs(); setStatus('Saved ✓', 'ok'); });
+  $('settings-save').addEventListener('click',  () => {
+    saveInputs();
+    setStatus('Saved ✓', 'ok');
+    // If the user just fixed their PAT, drain whatever is parked.
+    window.dispatchEvent(new CustomEvent('try-flush'));
+  });
   $('settings-test').addEventListener('click', testConnection);
   $('settings-clear').addEventListener('click', clearCredentials);
   $('settings-reset-all').addEventListener('click', resetAll);
