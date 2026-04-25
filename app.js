@@ -37,9 +37,11 @@ const s = {
 };
 
 // ---- Boot ----
+const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
+
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=28').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=29').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -56,24 +58,23 @@ async function init() {
       s.author = btn.dataset.initial;
       localStorage.setItem('tv-author', s.author);
       hide('setup-overlay');
-      let saved = null;
-      try { saved = await getVaultHandle(); } catch {}
-      if (saved) { show('app'); startApp(saved); }
-      else        { show('vault-setup-overlay'); }
+      await bootApp();
     }));
     return;
   }
 
-  // Author known — ensure overlay is hidden, check for a stored vault handle.
+  // Author known — ensure overlay is hidden and boot the app.
   hide('setup-overlay');
+  await bootApp();
+}
+
+// Always show the app shell. Vault folder is optional — captures and settings
+// work without it. Log/photos/wiki tabs degrade gracefully when no vault.
+async function bootApp() {
   let saved = null;
   try { saved = await getVaultHandle(); } catch {}
-  if (saved) {
-    show('app');
-    startApp(saved);
-  } else {
-    show('vault-setup-overlay');
-  }
+  show('app');
+  startApp(saved);
 }
 
 async function resetApp() {
@@ -86,7 +87,8 @@ async function resetApp() {
   window.location.reload();
 }
 
-// First-time vault folder selection
+// First-time vault folder selection — opened from the vault-banner button
+// (only when FSA is supported).
 $('pick-vault-btn').addEventListener('click', async () => {
   try {
     const handle = await vault.pickVaultFolder();
@@ -96,8 +98,7 @@ $('pick-vault-btn').addEventListener('click', async () => {
     }
     await saveVaultHandle(handle);
     hide('vault-setup-overlay');
-    show('app');
-    startApp(handle);
+    await activateVault(handle);
   } catch (e) {
     if (e.name !== 'AbortError') {
       console.error('Vault picker error:', e);
@@ -106,17 +107,41 @@ $('pick-vault-btn').addEventListener('click', async () => {
   }
 });
 
+// Connects an already-picked-and-permissioned vault handle to the running app
+// without re-binding listeners. Used by both the first-time picker and the
+// reconnect flow.
+async function activateVault(handle) {
+  s.vault = handle;
+  hideBanner('vault-banner');
+  setSyncStatus('syncing');
+  try {
+    await syncQueue();
+    await loadAvailableDays();
+    await loadLog();
+    await loadWiki();
+    await checkConflicts();
+    setSyncStatus('synced');
+  } catch {
+    setSyncStatus('offline');
+  }
+}
+
 async function startApp(handle) {
   $('date-label').textContent   = fmtDate(TODAY);
   $('author-label').textContent = s.author;
 
-  const perm = await vault.queryPermission(handle);
-  if (perm === 'granted') {
-    s.vault = handle;
-    setSyncStatus('synced');
-  } else {
-    showBanner();
+  if (handle && FSA_SUPPORTED) {
+    const perm = await vault.queryPermission(handle);
+    if (perm === 'granted') {
+      s.vault = handle;
+      setSyncStatus('synced');
+    } else {
+      showVaultBanner('reauth');
+    }
+  } else if (FSA_SUPPORTED) {
+    showVaultBanner('first');
   }
+  // FSA unsupported: no banner. Capture + settings work; log/photos/wiki idle.
 
   setupTabs();
   setupLogTab();
@@ -132,21 +157,32 @@ async function startApp(handle) {
   }
 }
 
+function showVaultBanner(mode) {
+  const banner = $('vault-banner');
+  const msg    = banner.querySelector('span');
+  const btn    = $('reconnect-btn');
+  if (mode === 'first') {
+    msg.textContent = 'Connect a vault folder to enable log and photos';
+    btn.textContent = 'Choose folder';
+    btn.dataset.mode = 'first';
+  } else {
+    msg.textContent = 'Vault folder needs access — entries saving locally';
+    btn.textContent = 'Authorize';
+    btn.dataset.mode = 'reauth';
+  }
+  banner.classList.add('show');
+}
+
 $('reconnect-btn').addEventListener('click', async () => {
+  if ($('reconnect-btn').dataset.mode === 'first') {
+    $('vault-setup-error').textContent = '';
+    show('vault-setup-overlay');
+    return;
+  }
   const handle = await getVaultHandle();
   if (!handle) return;
   const ok = await vault.requestPermission(handle);
-  if (ok) {
-    s.vault = handle;
-    hideBanner('vault-banner');
-    setSyncStatus('syncing');
-    await syncQueue();
-    await loadAvailableDays();
-    await loadLog();
-    await loadWiki();
-    await checkConflicts();
-    setSyncStatus('synced');
-  }
+  if (ok) await activateVault(handle);
 });
 
 $('conflict-dismiss').addEventListener('click', () => hideBanner('conflict-banner'));
