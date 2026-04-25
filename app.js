@@ -39,11 +39,19 @@ const s = {
 };
 
 // ---- Boot ----
+const VERSION = 33; // bump in lockstep with sw.js CACHE on every push
 const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
+
+// Stamp the version into the bottom-right of the app shell at module load.
+// Visible on every screen for at-a-glance "did the new build land?" debugging.
+{
+  const el = document.getElementById('app-version');
+  if (el) el.textContent = 'v' + VERSION;
+}
 
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=32').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=' + VERSION).catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {

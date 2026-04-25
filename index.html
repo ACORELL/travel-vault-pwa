@@ -249,6 +249,20 @@
     #header-settings-btn { background: none; border: none; color: #fff; opacity: .7; padding: 4px 8px; margin-left: 4px; cursor: pointer; font-family: inherit; font-size: 16px; line-height: 1; }
     #header-settings-btn:active { opacity: 1; }
 
+    /* ---- Version stamp (debug) ---- */
+    #app-version {
+      position: fixed;
+      right: 8px;
+      bottom: calc(var(--nav) + env(safe-area-inset-bottom) + 4px);
+      font-size: 10px;
+      font-family: 'Courier New', monospace;
+      color: var(--muted);
+      opacity: 0.5;
+      letter-spacing: .05em;
+      pointer-events: none;
+      z-index: 1;
+    }
+
     /* ---- Shared ---- */
     .empty-state { text-align: center; color: var(--muted); font-size: 14px; padding: 40px 0; }
   </style>
@@ -396,6 +410,8 @@
 </div>
 
 <input type="file" id="photo-input" accept="image/*" style="display:none">
+
+<div id="app-version" aria-hidden="true"></div>
 
 <!-- Settings overlay -->
 <div id="settings-overlay" class="overlay hidden">
