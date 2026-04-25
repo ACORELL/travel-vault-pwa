@@ -55,13 +55,18 @@ async function testConnection() {
   try {
     await getFile('trip.md');
     setStatus('Connected ✓', 'ok');
+    window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
   } catch (e) {
     if (e instanceof GitHubAuthError) {
       setStatus('Auth failed — check PAT and repo', 'error');
+      window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
     } else if (e instanceof GitHubNotFoundError) {
+      // Auth succeeded — repo is reachable; trip.md just isn't there.
       setStatus('Connected, but trip.md not found in repo', 'error');
+      window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
     } else {
       setStatus('Network error — check Worker URL or connectivity', 'error');
+      window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
     }
   }
 }

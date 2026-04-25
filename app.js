@@ -3,6 +3,8 @@ import * as vault from './vault.js';
 import * as settingsUi from './settings/settings-ui.js';
 import { putFile, GitHubAuthError } from './services/github.js';
 import * as queue from './services/queue.js';
+import * as settings from './services/settings.js';
+import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
 
 // ---- Constants ----
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -41,7 +43,7 @@ const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
 
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=29').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=30').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -154,8 +156,14 @@ async function startApp(handle) {
     await syncQueue();
     await loadWiki();
     await checkConflicts();
+  } else if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
+    // No FSA vault but GitHub is configured — assume sync OK until proven otherwise.
+    setSyncStatus('synced');
   }
 }
+
+// Settings' Test connection emits this event so the dot reflects reality.
+window.addEventListener('sync-status', e => setSyncStatus(e.detail));
 
 function showVaultBanner(mode) {
   const banner = $('vault-banner');
@@ -1392,12 +1400,14 @@ async function saveRawCapture() {
   try {
     await putFile(path, content, message);
     await queue.flush();
+    setSyncStatus('synced');
     st.textContent = 'Saved to raw ✓';
     st.style.color = '#166534';
     st.style.display = 'block';
     setTimeout(closeCaptureSheet, 2000);
   } catch (e) {
     if (e instanceof GitHubAuthError) {
+      setSyncStatus('offline');
       btn.disabled = false;
       btn.textContent = 'Save';
       closeCaptureSheet();
@@ -1407,6 +1417,7 @@ async function saveRawCapture() {
     // Network or unknown error — queue locally and confirm.
     try {
       await queue.enqueue({ path, content, message });
+      setSyncStatus('offline');
       st.textContent = 'Saved offline ✓';
       st.style.color = '#92400e';
       st.style.display = 'block';
