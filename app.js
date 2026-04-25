@@ -43,7 +43,7 @@ const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
 
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=30').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=31').catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
   }
   if (navigator.storage?.persist) {
@@ -157,13 +157,21 @@ async function startApp(handle) {
     await loadWiki();
     await checkConflicts();
   } else if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
-    // No FSA vault but GitHub is configured — assume sync OK until proven otherwise.
-    setSyncStatus('synced');
+    // No FSA vault but GitHub is configured — green if online, red if not.
+    setSyncStatus(navigator.onLine ? 'synced' : 'offline');
   }
 }
 
 // Settings' Test connection emits this event so the dot reflects reality.
 window.addEventListener('sync-status', e => setSyncStatus(e.detail));
+
+// Network-level reactivity — flip the dot the moment connectivity changes,
+// before the user spends effort composing a capture.
+window.addEventListener('offline', () => setSyncStatus('offline'));
+window.addEventListener('online',  () => {
+  if (s.vault) return; // FSA-driven status takes priority when a vault is connected
+  if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) setSyncStatus('synced');
+});
 
 function showVaultBanner(mode) {
   const banner = $('vault-banner');
@@ -1408,10 +1416,18 @@ async function saveRawCapture() {
   } catch (e) {
     if (e instanceof GitHubAuthError) {
       setSyncStatus('offline');
+      // Don't discard the user's text — park it in the queue. The next
+      // successful capture (after the PAT is fixed) will drain it via flush().
+      try { await queue.enqueue({ path, content, message }); } catch {}
       btn.disabled = false;
       btn.textContent = 'Save';
-      closeCaptureSheet();
-      settingsUi.openSettings();
+      st.textContent = 'Capture saved — fix PAT to send';
+      st.style.color = '#92400e';
+      st.style.display = 'block';
+      setTimeout(() => {
+        closeCaptureSheet();
+        settingsUi.openSettings();
+      }, 1200);
       return;
     }
     // Network or unknown error — queue locally and confirm.
