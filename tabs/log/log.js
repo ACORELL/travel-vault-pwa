@@ -1,18 +1,40 @@
-// Log tab — capture handlers, day navigation, proximity check.
-// Phase 4: writes go to the local timeline via services/timeline.js; thumbs
-// generated and stored via services/thumbs.js. Sync to GitHub is deferred
-// (services/sync.js, wired in step 6). vault.js + db.js are no longer used
-// from this tab and are deleted entirely in step 8.
-import { $, show, hide, nowHHMMSS } from '../../core/ui.js';
+// Log tab — capture / edit / delete handlers, day navigation, refresh button.
+//
+// Writes go straight to atomicEdit (services/timeline.js): fetch sha → run
+// mutator → PUT with sha. On network failure the optimistic local cache
+// update is treated as authoritative and the op is parked in services/ops.js
+// for a later flush. Reads are cache-first via timeline.getCached, falling
+// back to refresh.fetchDay on cache miss.
+//
+// Step 6 added check-in / note / photo capture + read + Refresh.
+// Step 7 added detail-view scaffolding.
+// Step 8 wires Edit + Delete (parent and appendment, including check-in
+//   cascade delete via timeline.deleteMany + best-effort thumb cleanup).
+// Step 9 wires Append (+ Comment / + Photo from inside the detail view).
+
+import { $, show, hide } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
 import * as geoloc from '../../services/location.js';
-import * as timeline from '../../services/timeline.js';
-import * as thumbs from '../../services/thumbs.js';
-import * as sync from '../../services/sync.js';
-import { GitHubAuthError } from '../../services/github.js';
+import {
+  addEntry, editEntry, deleteEntry,
+  addAppendment, editAppendment, deleteAppendment,
+  deleteMany,
+  getCached, putCached,
+  listAvailableDates, makeId,
+} from '../../services/timeline.js';
+import {
+  generateFromFile, storeLocal, getLocalUrl, deleteLocal,
+} from '../../services/thumbs.js';
+import {
+  fetchDay, lastRefreshedAt,
+} from '../../services/refresh.js';
+import * as ops from '../../services/ops.js';
+import {
+  putFile, deleteFile, getBinary,
+  GitHubAuthError, GitHubNotFoundError,
+} from '../../services/github.js';
 import * as logUi from './log-ui.js';
-
-const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
+import * as detail from './detail.js';
 
 // Local-implicit ISO datetime (no Z, no offset). The trip is one timezone;
 // the assembly PWA at home will canonicalise if it ever needs to.
@@ -23,20 +45,16 @@ function nowLocalIso() {
          `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function makeId() {
-  return `${nowHHMMSS().replace(/:/g, '')}_${s.author}`;
+function byT(a, b) {
+  return (a.t || '').localeCompare(b.t || '');
 }
 
-// No-op stubs — app.js still calls these until step 7 removes the FSA-flow
-// branches. They are removed alongside activateVault in that step.
-export async function syncQueue() {}
-export async function checkConflicts() {}
+// ─── Setup ────────────────────────────────────────────────────────────────────
 
-// ---- Log tab setup ----
 export function setupLogTab() {
-  $('btn-checkin').addEventListener('click', checkIn);
+  $('btn-checkin').addEventListener('click', addCheckin);
   $('btn-add-note').addEventListener('click', openNoteForm);
-  $('note-cancel').addEventListener('click',  () => { hide('note-form'); exitEditMode(); });
+  $('note-cancel').addEventListener('click',  closeNoteForm);
   $('note-confirm').addEventListener('click', submitNote);
   $('note-text').addEventListener('input', () => {
     $('note-confirm').disabled = !$('note-text').value.trim();
@@ -44,106 +62,68 @@ export function setupLogTab() {
 
   $('btn-add-photo').addEventListener('click', () => $('photo-input').click());
   $('photo-input').addEventListener('change', onPhotoSelected);
-  $('photo-cancel').addEventListener('click',  cancelPhotoForm);
+  $('photo-cancel').addEventListener('click',  closePhotoForm);
   $('photo-confirm').addEventListener('click', submitPhoto);
   $('photo-comment').addEventListener('input', () => {
     $('photo-confirm').disabled = !$('photo-comment').value.trim();
   });
+  $('photo-replace').addEventListener('click', () => $('photo-input').click());
 
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
 
-  $('btn-sync').addEventListener('click', runManualSync);
-  updateLastSyncedLabel();
+  const refreshBtn = $('btn-refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', runManualRefresh);
+  updateLastRefreshedLabel();
 
-  $('btn-pending-checkin').addEventListener('click', async () => {
-    $('btn-pending-checkin').disabled = true;
-    $('btn-pending-checkin').textContent = 'Getting GPS…';
-    await checkIn();
-    $('btn-pending-checkin').disabled = false;
-    $('btn-pending-checkin').textContent = '📍 Check in here';
-  });
+  detail.setupDetailView();
 
-  $('photo-replace').addEventListener('click', () => $('photo-input').click());
-  window.addEventListener('entry-edit-requested', e => editEntry(e.detail.id));
-  // Reload after a successful settings restore so the log tab shows what
-  // just landed in IDB.
+  // Detail-view action triggers (parent + appendment edit/delete). detail.js
+  // dispatches; we listen here so the cycle stays one-way (log.js → detail.js).
+  window.addEventListener('entry-edit-requested',           e => startEditEntry(e.detail.id));
+  window.addEventListener('entry-delete-requested',         e => deleteEntryRequested(e.detail.id));
+  window.addEventListener('checkin-delete-requested',       e => deleteCheckinGroupRequested(e.detail.id));
+  window.addEventListener('appendment-edit-requested',      e => startEditAppendment(e.detail.parentId, e.detail.appId));
+  window.addEventListener('appendment-delete-requested',    e => deleteAppendmentRequested(e.detail.parentId, e.detail.appId));
+  window.addEventListener('appendment-add-comment-requested', e => startAddAppendmentComment(e.detail.parentId));
+  window.addEventListener('appendment-add-photo-requested',   e => startAddAppendmentPhoto(e.detail.parentId));
+
+  // Re-render after restoreFromRepo finishes hydrating IDB.
   window.addEventListener('timeline-restored', () => loadLog());
+  // Re-render whenever the cache for the viewed date changes — fires on
+  // atomicEdit's tail (own writes) and on refresh.fetchDay (other devices).
+  window.addEventListener('day-changed', e => {
+    if (e.detail?.date === s.viewedDate) {
+      loadLog();
+      updateLastRefreshedLabel();
+    }
+  });
 }
 
-// ---- Edit ----
-async function editEntry(id) {
-  const entry = s.logEntries.find(e => e.id === id && e.author === s.author);
-  if (!entry) return;
-  s.editingId = entry.id;
-  s.editingType = entry.type;
+// ─── Capture (add) ────────────────────────────────────────────────────────────
 
-  if (entry.type === 'note') {
-    $('note-text').value = entry.content || '';
-    $('note-confirm').disabled = false;
-    $('note-confirm').textContent = 'Save';
-    show('note-form');
-    $('note-text').focus();
-    return;
-  }
-  if (entry.type === 'photo') {
-    s.pendingPhoto = {
-      file: null,
-      t: entry.t,
-      gps: entry.gps || null,
-      ref: entry.ref,
-      replaced: false,
-    };
-    $('photo-comment').value = entry.comment || '';
-    $('photo-comment').disabled = false;
-    $('photo-confirm').disabled = false;
-    $('photo-confirm').textContent = 'Save';
-    const prev = $('photo-preview');
-    if (prev._url) URL.revokeObjectURL(prev._url);
-    prev._url = null;
-    const url = await thumbs.getLocalUrl(entry.ref);
-    if (url) { prev.src = url; prev.hidden = false; }
-    const meta = $('photo-preview-meta');
-    const gpsLine = entry.gps ? `${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}` : 'no GPS';
-    meta.textContent = `${entry.ref} · ${gpsLine}`;
-    meta.hidden = false;
-    $('photo-replace').hidden = false;
-    show('photo-form');
-  }
-}
-
-function exitEditMode() {
-  s.editingId = null;
-  s.editingType = null;
-}
-
-async function checkIn() {
+async function addCheckin() {
   const btn = $('btn-checkin');
   btn.disabled = true;
   btn.textContent = 'Getting GPS…';
-
-  const gps = await geoloc.sample({ timeout: 10000, maximumAge: 0 });
-  await timeline.appendLocal(TODAY, {
-    id: makeId(),
-    type: 'checkin',
-    t: nowLocalIso(),
-    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
-  });
-
-  const draft = s.pendingDraft;
-  if (draft) {
-    logUi.hidePendingDraft();
-    await autoSubmitDraft(draft);
+  try {
+    const gps = await geoloc.sample({ timeout: 10000, maximumAge: 0 });
+    const t   = nowLocalIso();
+    const cached = await getCached(s.viewedDate);
+    const id  = makeId(t, s.author, cached?.entries || []);
+    const entry = {
+      id, type: 'checkin', author: s.author, t,
+      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+    };
+    await commitAdd(s.viewedDate, entry);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📍 Check in';
   }
-
-  await loadLog();
-
-  btn.disabled = false;
-  btn.textContent = '📍 Check in';
 }
 
 function openNoteForm() {
-  exitEditMode();
+  s.composing = { kind: 'add-note' };
   $('note-text').value = '';
   $('note-confirm').disabled = true;
   $('note-confirm').textContent = 'Add';
@@ -151,92 +131,96 @@ function openNoteForm() {
   $('note-text').focus();
 }
 
+function closeNoteForm() {
+  hide('note-form');
+  $('note-text').value = '';
+  s.composing = null;
+}
+
 async function submitNote() {
   const text = $('note-text').value.trim();
   if (!text) return;
-
-  // Edit mode: just update the existing entry's content. Skip proximity +
-  // GPS resampling — the user is correcting wording, not relocating.
-  if (s.editingId && s.editingType === 'note') {
-    const existing = s.logEntries.find(e => e.id === s.editingId && e.author === s.author);
-    if (!existing) { exitEditMode(); hide('note-form'); return; }
-    await timeline.appendLocal(s.viewedDate, { ...stripUiFields(existing), content: text });
-    hide('note-form');
-    $('note-text').value = '';
-    exitEditMode();
-    await loadLog();
-    return;
-  }
-
+  const c = s.composing;
+  if (!c) return;
+  const date = s.viewedDate;
   const btn = $('note-confirm');
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  btn.textContent = c.kind === 'add-note' ? 'Adding…' : 'Saving…';
 
-  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
-  const proximity = proximityFromGps(gps);
-  btn.textContent = 'Add';
-
-  if ($('note-form').classList.contains('hidden')) return;
-
-  if (proximity === 'out-of-range') {
-    hide('note-form');
-    $('note-text').value = '';
-    s.pendingDraft = { type: 'note', text };
-    logUi.showPendingDraft(text);
-    return;
+  if (c.kind === 'add-note') {
+    const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const t   = nowLocalIso();
+    const cached = await getCached(date);
+    const id  = makeId(t, s.author, cached?.entries || []);
+    const entry = {
+      id, type: 'note', author: s.author, t,
+      content: text,
+      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+    };
+    closeNoteForm();
+    await commitAdd(date, entry);
+  } else if (c.kind === 'edit-note') {
+    const entryId = c.entryId;
+    closeNoteForm();
+    await commitEdit(date, entryId, { content: text });
+  } else if (c.kind === 'edit-appendment-note') {
+    const { parentId, appId } = c;
+    closeNoteForm();
+    await commitEditAppendment(date, parentId, appId, { content: text });
+  } else if (c.kind === 'append-note') {
+    const { parentId } = c;
+    const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const t   = nowLocalIso();
+    const cached = await getCached(date);
+    const id  = makeId(t, s.author, cached?.entries || []);
+    const appendment = {
+      id, author: s.author, t,
+      content: text,
+      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+    };
+    closeNoteForm();
+    await commitAddAppendment(date, parentId, appendment);
   }
-
-  hide('note-form');
-  $('note-text').value = '';
-  await timeline.appendLocal(TODAY, {
-    id: makeId(),
-    type: 'note',
-    t: nowLocalIso(),
-    content: text,
-    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
-  });
-  await loadLog();
 }
 
-// `author` is added by getCombined for rendering; it isn't part of the
-// on-disk entry shape and must be stripped before write-back.
-function stripUiFields({ author, ...rest }) { return rest; }
-
-// D5: no preview. Tapping "+ Photo" opens the camera (capture="environment"
-// on #photo-input); selecting a photo brings up the comment form directly.
 async function onPhotoSelected(e) {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
 
-  // Replace flow inside the edit form: same ref, same gps, same id; just
-  // swap the file and refresh the preview. Don't open a new form, don't
-  // resample GPS.
-  if (s.editingId && s.editingType === 'photo' && s.pendingPhoto) {
-    s.pendingPhoto.file = file;
-    s.pendingPhoto.replaced = true;
+  // Replace within an edit-photo / edit-appendment-photo flow: keep the
+  // composing kind, just swap the file and refresh the preview. GPS isn't
+  // re-sampled — the original location anchors the photo.
+  if (s.composing?.kind === 'edit-photo' ||
+      s.composing?.kind === 'edit-appendment-photo') {
+    s.composing.replacedFile = file;
     const prev = $('photo-preview');
     if (prev._url) URL.revokeObjectURL(prev._url);
     prev._url = URL.createObjectURL(file);
     prev.src = prev._url;
-    prev.hidden = false;
     return;
   }
 
   const t = nowLocalIso();
-  s.pendingPhoto = { file, t };
+  // append-photo: parentId was preset by startAddAppendmentPhoto; we layer
+  // file + t on top. add-photo (no preset): build from scratch.
+  if (s.composing?.kind === 'append-photo') {
+    s.composing.file = file;
+    s.composing.t = t;
+  } else {
+    s.composing = { kind: 'add-photo', file, t };
+  }
 
-  // Preview: cap at 400px height (CSS), aspect ratio preserved. Comments
-  // field stays in the viewport without scrolling on tall portraits.
   const prev = $('photo-preview');
   if (prev._url) URL.revokeObjectURL(prev._url);
   prev._url = URL.createObjectURL(file);
   prev.src = prev._url;
   prev.hidden = false;
 
-  // Sample GPS for the preview meta (and reuse on submit).
   const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
-  s.pendingPhoto.gps = gps ? { lat: gps.lat, lon: gps.lon } : null;
+  if (s.composing?.kind === 'add-photo' || s.composing?.kind === 'append-photo') {
+    s.composing.gps = gps ? { lat: gps.lat, lon: gps.lon } : null;
+  }
   const meta = $('photo-preview-meta');
   const gpsLine = gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : 'GPS unavailable';
   meta.textContent = `${file.name || '(unnamed)'} · ${gpsLine}`;
@@ -250,7 +234,7 @@ async function onPhotoSelected(e) {
   show('photo-form');
 }
 
-function cancelPhotoForm() {
+function closePhotoForm() {
   hide('photo-form');
   $('photo-comment').value = '';
   $('photo-comment').disabled = true;
@@ -260,95 +244,486 @@ function cancelPhotoForm() {
   prev.hidden = true;
   $('photo-preview-meta').hidden = true;
   $('photo-replace').hidden = true;
-  s.pendingPhoto = null;
-  exitEditMode();
+  s.composing = null;
 }
 
 async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
-  if (!comment || !s.pendingPhoto) return;
-
-  // Edit mode: same ref, same id. If the file was replaced, regenerate the
-  // thumb and mark the ref unsynced so the next sync re-uploads. If only
-  // the comment changed, we just update the timeline entry.
-  if (s.editingId && s.editingType === 'photo') {
-    const existing = s.logEntries.find(e => e.id === s.editingId && e.author === s.author);
-    if (existing) {
-      if (s.pendingPhoto.replaced && s.pendingPhoto.file) {
-        const blob = await thumbs.generateFromFile(s.pendingPhoto.file);
-        await thumbs.storeLocal(existing.ref, blob);
-        await thumbs.markUnsynced(existing.ref);
-      }
-      await timeline.appendLocal(s.viewedDate, { ...stripUiFields(existing), comment });
-    }
-    cancelPhotoForm();
-    await loadLog();
-    return;
-  }
-
-  const { file, t, gps } = s.pendingPhoto;
+  if (!comment) return;
+  const c = s.composing;
+  if (!c) return;
+  const date = s.viewedDate;
   const btn = $('photo-confirm');
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  btn.textContent = c.kind === 'add-photo' ? 'Adding…' : 'Saving…';
 
-  const proximity = proximityFromGps(gps);
-  btn.textContent = 'Add';
-
-  if ($('photo-form').classList.contains('hidden')) {
-    s.pendingPhoto = null;
-    return;
+  if (c.kind === 'add-photo') {
+    if (!c.file) return;
+    const { file, t, gps } = c;
+    const hms  = t.slice(11, 19).replace(/:/g, '');
+    const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
+    const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    const cached = await getCached(date);
+    const id   = makeId(t, s.author, cached?.entries || []);
+    const entry = {
+      id, type: 'photo', author: s.author, t,
+      ref, comment,
+      gps: gps || null,
+    };
+    closePhotoForm();
+    await commitAddPhoto(date, entry, file);
+  } else if (c.kind === 'edit-photo') {
+    const entryId = c.entryId;
+    const replacedFile = c.replacedFile || null;
+    closePhotoForm();
+    await commitEditPhoto(date, entryId, { comment }, replacedFile);
+  } else if (c.kind === 'edit-appendment-photo') {
+    const { parentId, appId } = c;
+    const replacedFile = c.replacedFile || null;
+    closePhotoForm();
+    await commitEditAppendmentPhoto(date, parentId, appId, { comment }, replacedFile);
+  } else if (c.kind === 'append-photo') {
+    if (!c.file || !c.parentId) return;
+    const { file, t, gps, parentId } = c;
+    const hms  = t.slice(11, 19).replace(/:/g, '');
+    const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
+    const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    const cached = await getCached(date);
+    const id   = makeId(t, s.author, cached?.entries || []);
+    const appendment = {
+      id, author: s.author, t,
+      ref, comment,
+      gps: gps || null,
+    };
+    closePhotoForm();
+    await commitAddAppendmentPhoto(date, parentId, appendment, file);
   }
-
-  if (proximity === 'out-of-range') {
-    s.pendingPhoto = null;
-    cancelPhotoForm();
-    s.pendingDraft = { type: 'photo', file, t, comment, gps };
-    logUi.showPendingDraft(`📷 "${comment}"`);
-    return;
-  }
-
-  s.pendingPhoto = null;
-  cancelPhotoForm();
-  await finishPhotoWrite(file, t, comment, gps);
-  await loadLog();
 }
 
-async function finishPhotoWrite(file, t, comment, gps) {
-  // ref = YYYY-MM-DD_HHMMSS_<author>.<ext> — date-prefixed so unsyncedRefs(date)
-  // can filter by prefix; matches PHASE4.md §4 example.
-  const hms = t.slice(11, 19).replace(/:/g, '');
-  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-  const ref = `${TODAY}_${hms}_${s.author}.${ext}`;
-  const id  = `${hms}_${s.author}`;
+// ─── Edit (start) ─────────────────────────────────────────────────────────────
 
-  const blob = await thumbs.generateFromFile(file);
-  await thumbs.storeLocal(ref, blob);
-  await timeline.appendLocal(TODAY, {
-    id,
-    type: 'photo',
-    t,
-    ref,
-    comment,
-    gps: gps || null,
-  });
+function startAddAppendmentComment(parentId) {
+  s.composing = { kind: 'append-note', parentId };
+  $('note-text').value = '';
+  $('note-confirm').disabled = true;
+  $('note-confirm').textContent = 'Add';
+  show('note-form');
+  $('note-text').focus();
 }
+
+function startAddAppendmentPhoto(parentId) {
+  // Stage the parentId on composing; onPhotoSelected reads it after the
+  // file picker closes and lays the file/t/gps fields on top.
+  s.composing = { kind: 'append-photo', parentId };
+  $('photo-input').click();
+}
+
+function startEditEntry(entryId) {
+  const entry = s.logEntries.find(e => e.id === entryId);
+  if (!entry || entry.author !== s.author) return; // D6
+  if (entry.type === 'note') {
+    s.composing = { kind: 'edit-note', entryId };
+    $('note-text').value = entry.content || '';
+    $('note-confirm').disabled = false;
+    $('note-confirm').textContent = 'Save';
+    show('note-form');
+    $('note-text').focus();
+  } else if (entry.type === 'photo') {
+    s.composing = { kind: 'edit-photo', entryId, ref: entry.ref };
+    setupPhotoFormForEdit(entry);
+  }
+}
+
+function startEditAppendment(parentId, appId) {
+  const parent = s.logEntries.find(e => e.id === parentId);
+  if (!parent) return;
+  const app = (parent.appendments || []).find(a => a.id === appId);
+  if (!app || app.author !== s.author) return; // D6
+  if (app.ref) {
+    s.composing = { kind: 'edit-appendment-photo', parentId, appId, ref: app.ref };
+    setupPhotoFormForEdit(app);
+  } else {
+    s.composing = { kind: 'edit-appendment-note', parentId, appId };
+    $('note-text').value = app.content || '';
+    $('note-confirm').disabled = false;
+    $('note-confirm').textContent = 'Save';
+    show('note-form');
+    $('note-text').focus();
+  }
+}
+
+async function setupPhotoFormForEdit(entryOrApp) {
+  $('photo-comment').value = entryOrApp.comment || '';
+  $('photo-comment').disabled = false;
+  $('photo-confirm').disabled = !(entryOrApp.comment || '').trim();
+  $('photo-confirm').textContent = 'Save';
+
+  const prev = $('photo-preview');
+  if (prev._url) { URL.revokeObjectURL(prev._url); prev._url = null; }
+  prev.removeAttribute('src');
+  prev.hidden = true;
+  const url = await getLocalUrl(entryOrApp.ref);
+  if (url) {
+    prev.src = url;
+    prev.hidden = false;
+  }
+  const meta = $('photo-preview-meta');
+  const gpsLine = entryOrApp.gps
+    ? `${entryOrApp.gps.lat.toFixed(5)}, ${entryOrApp.gps.lon.toFixed(5)}`
+    : 'no GPS';
+  meta.textContent = `${entryOrApp.ref} · ${gpsLine}`;
+  meta.hidden = false;
+  $('photo-replace').hidden = false;
+  show('photo-form');
+}
+
+// ─── Delete (request → confirm → execute) ─────────────────────────────────────
+
+async function deleteEntryRequested(entryId) {
+  const entry = s.logEntries.find(e => e.id === entryId);
+  if (!entry || entry.type === 'checkin') return;
+  const apps = entry.appendments || [];
+  const msg = apps.length === 0
+    ? `Delete this ${entry.type}?`
+    : `Delete this ${entry.type} and ${apps.length} contribution${apps.length === 1 ? '' : 's'} (${formatBreakdown(apps)})?`;
+  if (!confirm(msg)) return;
+  await commitDeleteEntry(s.viewedDate, entry);
+}
+
+async function deleteAppendmentRequested(parentId, appId) {
+  const parent = s.logEntries.find(e => e.id === parentId);
+  if (!parent) return;
+  const app = (parent.appendments || []).find(a => a.id === appId);
+  if (!app) return;
+  const what = app.ref ? 'photo' : 'comment';
+  const msg = app.author === s.author
+    ? `Delete your ${what}?`
+    : `Delete ${app.author}'s ${what}?`;
+  if (!confirm(msg)) return;
+  await commitDeleteAppendment(s.viewedDate, parentId, app);
+}
+
+async function deleteCheckinGroupRequested(checkinId) {
+  const entry = s.logEntries.find(e => e.id === checkinId);
+  if (!entry || entry.type !== 'checkin') return;
+  const cascadeIds = computeCheckinCascade(checkinId, s.logEntries);
+  let msg;
+  if (cascadeIds.length === 0) {
+    msg = 'Delete this check-in?';
+  } else {
+    const cascadeItems = s.logEntries.filter(e => cascadeIds.includes(e.id));
+    msg = `Delete this check-in and ${cascadeIds.length} entr${cascadeIds.length === 1 ? 'y' : 'ies'} (${formatCheckinBreakdown(cascadeItems)})?`;
+  }
+  if (!confirm(msg)) return;
+  await commitDeleteMany(s.viewedDate, [checkinId, ...cascadeIds]);
+}
+
+function formatBreakdown(items) {
+  const counts = {};
+  for (const it of items) counts[it.author] = (counts[it.author] || 0) + 1;
+  return Object.entries(counts)
+    .sort()
+    .map(([a, c]) => `${c} from ${a}`)
+    .join(', ');
+}
+
+function formatCheckinBreakdown(items) {
+  const otherAuthor = s.author === 'N' ? 'A' : 'N';
+  const own   = items.filter(e => e.author === s.author).length;
+  const other = items.filter(e => e.author === otherAuthor).length;
+  const parts = [];
+  if (own > 0)   parts.push(`${own} yours`);
+  if (other > 0) parts.push(`${other} from ${otherAuthor}`);
+  return parts.join(', ');
+}
+
+function computeCheckinCascade(checkinId, entries) {
+  const sorted = [...entries].sort(byT);
+  const i = sorted.findIndex(e => e.id === checkinId && e.type === 'checkin');
+  if (i < 0) return [];
+  const next = sorted.slice(i + 1).find(e => e.type === 'checkin');
+  const upper = next ? next.t : '￿';
+  return sorted
+    .filter(e => e.t > sorted[i].t && e.t < upper)
+    .map(e => e.id);
+}
+
+// ─── Commit helpers ───────────────────────────────────────────────────────────
+
+// Optimistically update the local cache so the UI reflects the new entry
+// immediately. atomicEdit's tail will overwrite the cache with the canonical
+// shape (including any entries the other device added) on success; on
+// network failure, this optimistic state survives until the queued op drains.
+async function applyOptimistic(date, mutator) {
+  const cached = await getCached(date);
+  const next   = mutator(cached?.entries || []);
+  // Reuse the existing sha — atomicEdit fetches sha fresh anyway, so a stale
+  // sha in cache doesn't break writes. The 'day-changed' emit re-renders.
+  await putCached(date, next, cached?.sha);
+}
+
+async function commitAdd(date, entry) {
+  await applyOptimistic(date, xs => [...xs, entry].sort(byT));
+  try {
+    await addEntry(date, entry);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+  }
+}
+
+async function commitAddPhoto(date, entry, file) {
+  const blob = await generateFromFile(file);
+  await storeLocal(entry.ref, blob);
+  await applyOptimistic(date, xs => [...xs, entry].sort(byT));
+
+  // Thumb first so the timeline.json never points at a missing file. If the
+  // thumb upload fails (non-auth), queue both ops in order — entry can't
+  // ship before its thumb does.
+  let thumbDirect = false;
+  try {
+    await putFile(`days/${date}/thumbs/${entry.ref}`, blob,
+                  `Add thumbnail ${entry.ref}`);
+    thumbDirect = true;
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'put-thumb', date, args: { ref: entry.ref } });
+  }
+
+  if (!thumbDirect) {
+    await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+    return;
+  }
+  try {
+    await addEntry(date, entry);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+  }
+}
+
+async function commitAddAppendment(date, parentId, appendment) {
+  await applyOptimistic(date, xs => xs.map(e => {
+    if (e.id !== parentId) return e;
+    return {
+      ...e,
+      appendments: [...(e.appendments || []), appendment].sort(byT),
+    };
+  }));
+  try {
+    await addAppendment(date, parentId, appendment);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-appendment', date, args: { parentId, appendment } });
+  }
+}
+
+async function commitAddAppendmentPhoto(date, parentId, appendment, file) {
+  const blob = await generateFromFile(file);
+  await storeLocal(appendment.ref, blob);
+  await applyOptimistic(date, xs => xs.map(e => {
+    if (e.id !== parentId) return e;
+    return {
+      ...e,
+      appendments: [...(e.appendments || []), appendment].sort(byT),
+    };
+  }));
+
+  let thumbDirect = false;
+  try {
+    await putFile(`days/${date}/thumbs/${appendment.ref}`, blob,
+                  `Add thumbnail ${appendment.ref}`);
+    thumbDirect = true;
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'put-thumb', date, args: { ref: appendment.ref } });
+  }
+
+  if (!thumbDirect) {
+    await ops.enqueue({ kind: 'add-appendment', date, args: { parentId, appendment } });
+    return;
+  }
+  try {
+    await addAppendment(date, parentId, appendment);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-appendment', date, args: { parentId, appendment } });
+  }
+}
+
+async function commitEdit(date, id, patch) {
+  await applyOptimistic(date, xs =>
+    xs.map(e => e.id === id ? { ...e, ...patch } : e),
+  );
+  try {
+    await editEntry(date, id, patch);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'edit-entry', date, args: { id, patch } });
+  }
+}
+
+async function commitEditAppendment(date, parentId, appId, patch) {
+  await applyOptimistic(date, xs => xs.map(e => {
+    if (e.id !== parentId) return e;
+    return {
+      ...e,
+      appendments: (e.appendments || []).map(a =>
+        a.id === appId ? { ...a, ...patch } : a,
+      ),
+    };
+  }));
+  try {
+    await editAppendment(date, parentId, appId, patch);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'edit-appendment', date, args: { parentId, appId, patch } });
+  }
+}
+
+async function commitEditPhoto(date, id, patch, replacedFile) {
+  if (replacedFile) {
+    const entry = s.logEntries.find(e => e.id === id);
+    if (entry?.ref) await replaceThumb(date, entry.ref, replacedFile);
+  }
+  await commitEdit(date, id, patch);
+}
+
+async function commitEditAppendmentPhoto(date, parentId, appId, patch, replacedFile) {
+  if (replacedFile) {
+    const parent = s.logEntries.find(e => e.id === parentId);
+    const app = parent?.appendments?.find(a => a.id === appId);
+    if (app?.ref) await replaceThumb(date, app.ref, replacedFile);
+  }
+  await commitEditAppendment(date, parentId, appId, patch);
+}
+
+// Replace the thumb at `ref` with the bytes from `file`. Local store is
+// overwritten (storeLocal also invalidates the URL cache so the new image
+// renders immediately). For the remote PUT we deliberately omit sha so
+// github.putFile's retry-on-422 logic refetches the live sha and stomps —
+// that's the "last-write-wins" behaviour we want for thumb replacement.
+async function replaceThumb(date, ref, file) {
+  const blob = await generateFromFile(file);
+  await storeLocal(ref, blob);
+  try {
+    await putFile(`days/${date}/thumbs/${ref}`, blob, `Replace thumbnail ${ref}`);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'put-thumb', date, args: { ref } });
+  }
+}
+
+async function commitDeleteEntry(date, entry) {
+  const refSink = collectRefs(entry);
+  await applyOptimistic(date, xs => xs.filter(e => e.id !== entry.id));
+  try {
+    await deleteEntry(date, entry.id, []);
+    await cleanupThumbs(date, refSink);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'delete-entry', date, args: { id: entry.id } });
+    queueThumbCleanup(date, refSink);
+  }
+}
+
+async function commitDeleteAppendment(date, parentId, app) {
+  const refSink = app.ref ? [app.ref] : [];
+  await applyOptimistic(date, xs => xs.map(e => {
+    if (e.id !== parentId) return e;
+    return { ...e, appendments: (e.appendments || []).filter(a => a.id !== app.id) };
+  }));
+  try {
+    await deleteAppendment(date, parentId, app.id, []);
+    await cleanupThumbs(date, refSink);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'delete-appendment', date, args: { parentId, appId: app.id } });
+    queueThumbCleanup(date, refSink);
+  }
+}
+
+async function commitDeleteMany(date, ids) {
+  const idSet = new Set(ids);
+  const cached = await getCached(date);
+  const refSink = [];
+  for (const e of cached?.entries || []) {
+    if (!idSet.has(e.id)) continue;
+    if (e.ref) refSink.push(e.ref);
+    for (const a of e.appendments || []) if (a.ref) refSink.push(a.ref);
+  }
+  await applyOptimistic(date, xs => xs.filter(e => !idSet.has(e.id)));
+  try {
+    await deleteMany(date, ids, []);
+    await cleanupThumbs(date, refSink);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'delete-many', date, args: { ids } });
+    queueThumbCleanup(date, refSink);
+  }
+}
+
+function collectRefs(entry) {
+  const refs = [];
+  if (entry.ref) refs.push(entry.ref);
+  for (const a of entry.appendments || []) if (a.ref) refs.push(a.ref);
+  return refs;
+}
+
+// Online cleanup: for each ref, drop the local blob then fetch the remote
+// sha and DELETE the file. Failures are swallowed (D10 — orphan thumbs are
+// harmless) but auth errors short-circuit so the user can fix settings.
+async function cleanupThumbs(date, refs) {
+  for (const ref of refs) {
+    deleteLocal(ref).catch(() => {});
+    try {
+      const { sha } = await getBinary(`days/${date}/thumbs/${ref}`, 'image/jpeg');
+      await deleteFile(`days/${date}/thumbs/${ref}`, sha, `Delete thumbnail ${ref}`);
+    } catch (e) {
+      if (e instanceof GitHubAuthError) return;
+      if (e instanceof GitHubNotFoundError) continue;
+      // network or other — best-effort, swallow
+    }
+  }
+}
+
+// Offline cleanup: drop the local blob and queue a remote DELETE op for
+// when the network returns. Order matters less here than for adds — the
+// timeline mutation already removed the reference, the thumb is now an
+// orphan and can be deleted whenever.
+function queueThumbCleanup(date, refs) {
+  for (const ref of refs) {
+    deleteLocal(ref).catch(() => {});
+    ops.enqueue({ kind: 'delete-thumb', date, args: { ref } }).catch(() => {});
+  }
+}
+
+// ─── Read path ────────────────────────────────────────────────────────────────
 
 export async function loadLog() {
-  // getCombined returns own (from local IDB) ∪ other-author (fetched + cached
-  // from the data repo), each entry tagged with `author`. Renders sorted by t.
-  s.logEntries = await timeline.getCombined(s.viewedDate);
+  let entries;
+  const cached = await getCached(s.viewedDate);
+  if (cached) {
+    entries = cached.entries;
+  } else {
+    try {
+      entries = await fetchDay(s.viewedDate);
+    } catch (e) {
+      if (e instanceof GitHubAuthError) throw e;
+      entries = [];
+    }
+  }
+  s.logEntries = entries;
   logUi.updateDayNavUI();
   logUi.updateActionBarState();
   await logUi.renderLog();
 }
 
-// ---- Day navigation ----
+// ─── Day navigation ───────────────────────────────────────────────────────────
+
 export async function loadAvailableDays() {
-  try {
-    s.availableDays = await timeline.listAvailableDates();
-  } catch {
-    s.availableDays = [TODAY];
-  }
+  try { s.availableDays = await listAvailableDates(); }
+  catch { s.availableDays = [TODAY]; }
 }
 
 async function navigateDay(dir) {
@@ -359,85 +734,41 @@ async function navigateDay(dir) {
   if (newIdx < 0 || newIdx >= s.availableDays.length) return;
   s.viewedDate = s.availableDays[newIdx];
   await loadLog();
+  // Background refresh for the just-navigated date so cross-device updates
+  // surface without requiring a manual tap on Refresh.
+  fetchDay(s.viewedDate).catch(() => {});
 }
 
-// ---- Proximity enforcement ----
-function haversineMetres(lat1, lon1, lat2, lon2) {
-  const R    = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a    = Math.sin(dLat / 2) ** 2
-             + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
-             * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// ─── Refresh ──────────────────────────────────────────────────────────────────
 
-function getLastCheckinGps() {
-  for (let i = s.logEntries.length - 1; i >= 0; i--) {
-    const e = s.logEntries[i];
-    if (e.type === 'checkin' && e.gps) return e.gps;
-  }
-  return null;
-}
-
-function proximityFromGps(currentGps) {
-  const checkinGps = getLastCheckinGps();
-  if (!checkinGps) return 'ok';
-  if (!currentGps) return 'ok';
-  const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
-  return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
-}
-
-async function runManualSync() {
-  const btn = $('btn-sync');
+async function runManualRefresh() {
+  const btn = $('btn-refresh');
+  if (!btn) return;
   btn.disabled = true;
-  btn.textContent = 'Syncing…';
+  btn.textContent = 'Refreshing…';
   try {
-    await sync.syncToday();
-    btn.textContent = 'Sync now';
-    updateLastSyncedLabel();
-    await loadLog();
+    await fetchDay(s.viewedDate, { force: true });
+    btn.textContent = 'Refresh';
   } catch (e) {
-    btn.textContent = 'Sync now';
-    if (e instanceof GitHubAuthError) {
-      $('last-synced-label').textContent = 'Auth error — check settings';
-    } else {
-      $('last-synced-label').textContent = 'Sync failed';
+    btn.textContent = 'Refresh';
+    const label = $('last-refreshed-label');
+    if (label) {
+      label.textContent = e instanceof GitHubAuthError
+        ? 'Auth error — check settings'
+        : 'Refresh failed';
     }
   } finally {
     btn.disabled = false;
   }
 }
 
-function updateLastSyncedLabel() {
-  const ts = sync.lastSyncedAt();
-  const el = $('last-synced-label');
-  if (!ts) { el.textContent = 'Never synced'; return; }
+async function updateLastRefreshedLabel() {
+  const el = $('last-refreshed-label');
+  if (!el) return;
+  const ts = await lastRefreshedAt(s.viewedDate);
+  if (!ts) { el.textContent = 'Not refreshed yet'; return; }
   const d = new Date(ts);
   const pad = n => String(n).padStart(2, '0');
-  el.textContent = `Last sync ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  el.textContent = `Last refreshed ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// Triggered by app.js on foreground / online — quietly best-effort sync.
-export async function autoSync() {
-  if (!sync.isAutoSyncDue()) return;
-  try {
-    await sync.syncToday();
-    updateLastSyncedLabel();
-    await loadLog();
-  } catch {}
-}
-
-async function autoSubmitDraft(draft) {
-  if (draft.type === 'note') {
-    await timeline.appendLocal(TODAY, {
-      id: makeId(),
-      type: 'note',
-      t: nowLocalIso(),
-      content: draft.text,
-      gps: draft.gps || null,
-    });
-  } else if (draft.type === 'photo') {
-    await finishPhotoWrite(draft.file, draft.t, draft.comment, draft.gps);
-  }
-}

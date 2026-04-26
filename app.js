@@ -9,10 +9,12 @@ import * as wikiUi from './tabs/wiki/wiki-ui.js';
 import * as todayStrip from './tabs/wiki/today-strip.js';
 import * as captureUi from './tabs/capture/capture-ui.js';
 import * as logTab from './tabs/log/log.js';
+import * as refresh from './services/refresh.js';
+import * as ops from './services/ops.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 45; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 46; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
 // Visible on every screen for at-a-glance "did the new build land?" debugging.
@@ -126,7 +128,8 @@ window.addEventListener('online',  () => {
   if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
     setSyncStatus('synced');
     tryFlush();
-    logTab.autoSync();
+    drainOps();
+    refresh.maybeRefresh(s.viewedDate).catch(() => {});
   }
 });
 
@@ -134,8 +137,21 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (!navigator.onLine) return;
   if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO)) return;
-  logTab.autoSync();
+  refresh.maybeRefresh(s.viewedDate).catch(() => {});
+  drainOps();
 });
+
+// Best-effort drain of the timeline mutation queue (services/ops.js).
+// Mirrors tryFlush for the wiki-raw queue. GitHubAuthError stops the drain;
+// other errors leave remaining ops queued for the next trigger.
+async function drainOps() {
+  try {
+    if ((await ops.count()) === 0) return;
+  } catch { return; }
+  try { await ops.flush(); }
+  catch { /* auth — settings will surface */ }
+}
+window.addEventListener('try-flush', drainOps);
 
 // Dev-only "Test strip" button injected into the wiki cap-row when ?dev=1.
 function maybeAddTestStripButton() {

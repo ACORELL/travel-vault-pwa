@@ -119,7 +119,9 @@ export async function putFile(path, content, message, sha) {
   const { token, repo } = auth();
   let res = await putOnce(repo, token, path, content, message, sha);
 
-  // Conflict: re-fetch sha and retry once.
+  // Conflict: re-fetch sha and retry once with the same content. Used by
+  // create-only callers (queue.js raw captures, thumb uploads) where the
+  // local content is authoritative — second device just hasn't seen it yet.
   if (res.status === 409 || res.status === 422) {
     let currentSha;
     try {
@@ -134,6 +136,21 @@ export async function putFile(path, content, message, sha) {
     }
   }
 
+  if (!res.ok) throwForStatus(res, path);
+  const json = await res.json();
+  return { sha: json.content?.sha };
+}
+
+// putFileExact: PUT with sha and throw GitHubConflictError on the first
+// 409/422. timeline.js atomicEdit needs this so it can refetch the file and
+// re-run its mutator on the fresh remote content rather than overwriting
+// another device's concurrent write with stale local content.
+export async function putFileExact(path, content, message, sha) {
+  const { token, repo } = auth();
+  const res = await putOnce(repo, token, path, content, message, sha);
+  if (res.status === 409 || res.status === 422) {
+    throw new GitHubConflictError(`${res.status} on ${path}`);
+  }
   if (!res.ok) throwForStatus(res, path);
   const json = await res.json();
   return { sha: json.content?.sha };

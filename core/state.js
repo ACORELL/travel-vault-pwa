@@ -19,10 +19,17 @@ export const s = {
   syncStatus:    'offline',
   logEntries:    [],
   wikiPages:     [],
-  pendingPhoto:  null,   // { file, ts }
-  pendingDraft:  null,   // { type: 'note'|'photo', text?, file?, ts?, comment? }
-  editingId:     null,   // entry.id when an existing entry is being edited
-  editingType:   null,   // 'note' | 'photo' when editingId is set
+  // What the open form is for. null when no form is open.
+  // Shape: { kind: 'add-note' | 'add-photo'
+  //              | 'edit-note' | 'edit-photo'                  // Step 8
+  //              | 'append-note' | 'append-photo'              // Step 9
+  //              | 'edit-appendment-note' | 'edit-appendment-photo'   // Step 8
+  //              ...args }   args depend on kind (entryId, parentId, appId, file, t, gps)
+  composing:     null,
+  // Entry id when the detail-view sheet is open. Independent of `composing`
+  // so a form opened from the detail view can re-render the sheet on close.
+  // Wired in Step 7.
+  viewingEntry:  null,
   viewedDate:    TODAY,
   availableDays: [],
 };

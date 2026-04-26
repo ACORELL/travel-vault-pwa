@@ -1,76 +1,89 @@
-// One-shot recovery: pull this device's own timelines + thumbs from the
-// data repo back into local IDB. Used after a "Clear browsing data" or a
-// fresh PWA install — the data repo is the canonical source, the local IDB
-// is the durable working buffer.
+// One-shot recovery: pull every day's shared timeline + referenced thumbs
+// from the data repo back into local IDB. Used after "Clear browsing data"
+// or a fresh install. The data repo is the canonical source; the local IDB
+// is the working cache.
 //
-// Iterates every date in days/, fetches days/<date>/timelines/<self>.json,
-// replays each entry into timeline-local, then pulls every referenced thumb
-// into thumbs-local and marks it synced. Updates the local sha map so the
-// next sync uses the correct sha for follow-up PUTs.
+// Phase 5 schema: one days/<date>/timeline.json per day (both authors).
+// For every date in days/ we fetch the file, hydrate timeline.js's
+// day-cache, then walk every entry and appendment with a `ref` and pull
+// the thumb blob into thumbs-local.
 
-import { get, AUTHOR } from './settings.js';
-import { getFile, getBinary, GitHubAuthError, GitHubNotFoundError } from './github.js';
-import { appendLocal, listAvailableDates } from './timeline.js';
-import { storeLocal, markSynced } from './thumbs.js';
+import {
+  getFile, getBinary, listDir,
+  GitHubAuthError, GitHubNotFoundError,
+} from './github.js';
+import { putCached } from './timeline.js';
+import { storeLocal } from './thumbs.js';
 
-const STATE_KEY = 'tv-sync-state';
-
-function readState() {
-  try { return JSON.parse(localStorage.getItem(STATE_KEY) || '{}'); }
-  catch { return {}; }
+async function listDates() {
+  try {
+    const items = await listDir('days');
+    return items
+      .filter(i => i.type === 'dir' && /^\d{4}-\d{2}-\d{2}$/.test(i.name))
+      .map(i => i.name)
+      .sort()
+      .reverse();
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    if (e instanceof GitHubNotFoundError) return [];
+    throw e;
+  }
 }
 
-function writeState(patch) {
-  const next = { ...readState(), ...patch };
-  localStorage.setItem(STATE_KEY, JSON.stringify(next));
+function refsIn(entries) {
+  const refs = [];
+  for (const e of entries) {
+    if (e.ref) refs.push(e.ref);
+    for (const a of e.appendments || []) if (a.ref) refs.push(a.ref);
+  }
+  return refs;
+}
+
+function countItems(entries) {
+  let n = entries.length;
+  for (const e of entries) n += (e.appendments || []).length;
+  return n;
 }
 
 export async function restoreFromRepo(onProgress = () => {}) {
-  const author = get(AUTHOR);
-  if (author !== 'N' && author !== 'A') throw new Error(`Author not set (got ${author})`);
-
-  const dates = await listAvailableDates();
-  let entries = 0, thumbs = 0;
-  const shaMap = { ...(readState().timelineSha || {}) };
+  const dates = await listDates();
+  let entries = 0;
+  let thumbs  = 0;
 
   for (const date of dates) {
     onProgress({ phase: 'date', date, entries, thumbs });
-    const path = `days/${date}/timelines/${author}.json`;
-    let data, sha;
+
+    let dayEntries;
+    let sha;
     try {
-      const res = await getFile(path);
-      data = JSON.parse(res.content);
-      sha = res.sha;
+      const fetched = await getFile(`days/${date}/timeline.json`);
+      sha = fetched.sha;
+      try { dayEntries = JSON.parse(fetched.content); } catch { dayEntries = []; }
+      if (!Array.isArray(dayEntries)) dayEntries = [];
     } catch (e) {
       if (e instanceof GitHubAuthError) throw e;
       if (e instanceof GitHubNotFoundError) continue;
       onProgress({ phase: 'error', date, message: e.message });
       continue;
     }
-    shaMap[`${date}/${author}`] = sha;
 
-    for (const entry of data) {
-      await appendLocal(date, entry);
-      entries++;
-    }
+    await putCached(date, dayEntries, sha);
+    entries += countItems(dayEntries);
     onProgress({ phase: 'date-entries-done', date, entries, thumbs });
 
-    for (const entry of data) {
-      if (entry.type !== 'photo' || !entry.ref) continue;
+    for (const ref of refsIn(dayEntries)) {
       try {
-        const { blob } = await getBinary(`days/${date}/thumbs/${entry.ref}`, 'image/jpeg');
-        await storeLocal(entry.ref, blob);
-        await markSynced(entry.ref);
+        const { blob } = await getBinary(`days/${date}/thumbs/${ref}`, 'image/jpeg');
+        await storeLocal(ref, blob);
         thumbs++;
         onProgress({ phase: 'thumb', date, entries, thumbs });
       } catch (e) {
         if (e instanceof GitHubAuthError) throw e;
         if (e instanceof GitHubNotFoundError) continue;
-        onProgress({ phase: 'error', date, ref: entry.ref, message: e.message });
+        onProgress({ phase: 'error', date, ref, message: e.message });
       }
     }
   }
 
-  writeState({ timelineSha: shaMap, lastSyncedAt: new Date().toISOString() });
   return { entries, thumbs, dates: dates.length };
 }

@@ -1,4 +1,4 @@
-// Web-quality thumbnail blobs for own captures, kept in IDB until sync.
+// Web-quality thumbnail blobs for own captures.
 //
 // generateFromFile resizes via <canvas> to long-edge 1600 px at JPEG q=75
 // (~150-250 KB per photo, ~300 MB for a 30-day 50-photos-per-day trip —
@@ -6,11 +6,16 @@
 //
 // The full-resolution File from the camera input is *never* persisted by
 // the PWA. It stays on the phone's camera roll for the assembly PWA at
-// home (Phase 6). Only the resized thumbnail is stored locally and pushed.
+// home (Phase 6). Only the resized thumbnail is stored locally and pushed
+// to the data repo via tabs/log/log.js (direct putFile or queued put-thumb
+// op when offline). Phase 5 dropped sync-state tracking — the upload happens
+// inline with the entry mutation, not as a deferred sweep.
 
 const DB_NAME     = 'tv-thumbs';
 const STORE_BLOBS = 'thumbs-local';
-const STORE_SYNC  = 'thumbs-sync-state';
+// The Phase-4 'thumbs-sync-state' store still exists in upgraded installs at
+// IDB v1 but is no longer read or written. PHASE5.md §11 marks it as harmless
+// vestigial data — not worth a schema bump to drop.
 
 const LONG_EDGE = 1600;
 const QUALITY   = 0.75;
@@ -24,9 +29,6 @@ function open() {
     req.onupgradeneeded = ({ target: { result: db } }) => {
       if (!db.objectStoreNames.contains(STORE_BLOBS)) {
         db.createObjectStore(STORE_BLOBS, { keyPath: 'ref' });
-      }
-      if (!db.objectStoreNames.contains(STORE_SYNC)) {
-        db.createObjectStore(STORE_SYNC, { keyPath: 'ref' });
       }
     };
     req.onsuccess = e => { _db = e.target.result; resolve(_db); };
@@ -59,6 +61,9 @@ function scaledDims(w, h) {
 
 // ─── Local blob store ─────────────────────────────────────────────────────────
 export async function storeLocal(ref, blob) {
+  // Invalidate any cached object URL for this ref — after a photo replace
+  // the new blob would otherwise still render through the old URL.
+  invalidateUrl(ref);
   const store = await tx(STORE_BLOBS, 'readwrite');
   return new Promise((resolve, reject) => {
     const req = store.put({ ref, blob });
@@ -90,59 +95,21 @@ export async function getLocalUrl(ref) {
   return url;
 }
 
-// ─── Sync state ───────────────────────────────────────────────────────────────
-// "synced" = the thumb has been PUT to the data repo at least once. Thumb
-// paths are unique per ref, so the queue's create-only contract applies and
-// we don't need to store a sha.
-export async function unsyncedRefs(date) {
-  const [refs, synced] = await Promise.all([listLocalRefsForDate(date), listSyncedSet()]);
-  return refs.filter(r => !synced.has(r));
+function invalidateUrl(ref) {
+  const url = _urls.get(ref);
+  if (url) {
+    URL.revokeObjectURL(url);
+    _urls.delete(ref);
+  }
 }
 
-async function listLocalRefsForDate(date) {
-  const prefix = `${date}_`;
-  const store  = await tx(STORE_BLOBS, 'readonly');
-  return new Promise((resolve, reject) => {
-    const refs = [];
-    store.openCursor().onsuccess = e => {
-      const cur = e.target.result;
-      if (cur) {
-        if (cur.value.ref.startsWith(prefix)) refs.push(cur.value.ref);
-        cur.continue();
-      } else resolve(refs);
-    };
-    store.transaction.onerror = () => reject(store.transaction.error);
-  });
-}
-
-async function listSyncedSet() {
-  const store = await tx(STORE_SYNC, 'readonly');
-  return new Promise((resolve, reject) => {
-    const set = new Set();
-    store.openCursor().onsuccess = e => {
-      const cur = e.target.result;
-      if (cur) { set.add(cur.value.ref); cur.continue(); }
-      else resolve(set);
-    };
-    store.transaction.onerror = () => reject(store.transaction.error);
-  });
-}
-
-export async function markSynced(ref) {
-  const store = await tx(STORE_SYNC, 'readwrite');
-  return new Promise((resolve, reject) => {
-    const req = store.put({ ref, syncedAt: Date.now() });
-    req.onsuccess = () => resolve();
-    req.onerror   = () => reject(req.error);
-  });
-}
-
-// Used after a thumb has been replaced (edit-photo flow): the local blob
-// is overwritten, but the previously-synced version still lives in the
-// data repo. Removing the sync-state entry surfaces the ref again in
-// unsyncedRefs so the next sync re-uploads it.
-export async function markUnsynced(ref) {
-  const store = await tx(STORE_SYNC, 'readwrite');
+// ─── Local cleanup ────────────────────────────────────────────────────────────
+// Used by tabs/log/log.js when an entry or appendment with a `ref` is deleted.
+// Failure to release the URL or remove the blob is non-fatal (the next reload
+// would simply not see this ref any more).
+export async function deleteLocal(ref) {
+  invalidateUrl(ref);
+  const store = await tx(STORE_BLOBS, 'readwrite');
   return new Promise((resolve, reject) => {
     const req = store.delete(ref);
     req.onsuccess = () => resolve();
