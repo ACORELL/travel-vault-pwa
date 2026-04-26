@@ -2,6 +2,7 @@ import { saveVaultHandle, getVaultHandle, enqueueLogEntry, getLogQueue, clearLog
 import * as vault from './vault.js';
 import * as settingsUi from './settings/settings-ui.js';
 import { putFile, GitHubAuthError } from './services/github.js';
+import * as wiki from './services/wiki.js';
 import * as queue from './services/queue.js';
 import * as settings from './services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
@@ -39,7 +40,7 @@ const s = {
 };
 
 // ---- Boot ----
-const VERSION = 33; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 34; // bump in lockstep with sw.js CACHE on every push
 const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
 
 // Stamp the version into the bottom-right of the app shell at module load.
@@ -181,9 +182,9 @@ async function startApp(handle) {
 
   await loadAvailableDays();
   await loadLog();
+  await loadWiki();
   if (s.vault) {
     await syncQueue();
-    await loadWiki();
     await checkConflicts();
   } else if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
     // No FSA vault but GitHub is configured — green if online, red if not.
@@ -644,9 +645,9 @@ function setupWikiTab() {
 }
 
 async function loadWiki() {
-  if (!s.vault) return;
+  if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO)) return;
   try {
-    s.wikiPages = await vault.loadWikiPages(s.vault);
+    s.wikiPages = await wiki.loadWikiPages();
     renderTodayStrip();
     renderWikiList('');
   } catch {}
