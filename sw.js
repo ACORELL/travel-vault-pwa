@@ -14,7 +14,7 @@ const CACHE = 'tv-phone-v35';
 const DEV_MODE = false;
 
 const SHELL = [
-  './', './index.html', './app.js', './db.js', './vault.js', './exif.js', './manifest.json',
+  './', './index.html', './app.js', './exif.js', './manifest.json',
   './services/settings.js', './services/github.js', './services/queue.js', './services/wiki.js',
   './services/location.js', './services/timeline.js', './services/thumbs.js', './services/sync.js',
   './settings/settings-ui.js',
