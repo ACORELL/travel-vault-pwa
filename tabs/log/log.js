@@ -106,7 +106,8 @@ async function submitNote() {
   btn.disabled = true;
   btn.textContent = 'Checking…';
 
-  const proximity = await checkProximity();
+  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  const proximity = proximityFromGps(gps);
   btn.textContent = 'Add';
 
   if ($('note-form').classList.contains('hidden')) return;
@@ -126,6 +127,7 @@ async function submitNote() {
     type: 'note',
     t: nowLocalIso(),
     content: text,
+    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
   });
   await loadLog();
 }
@@ -137,7 +139,24 @@ async function onPhotoSelected(e) {
   if (!file) return;
   e.target.value = '';
 
-  s.pendingPhoto = { file, t: nowLocalIso() };
+  const t = nowLocalIso();
+  s.pendingPhoto = { file, t };
+
+  // Preview: cap at 400px height (CSS), aspect ratio preserved. Comments
+  // field stays in the viewport without scrolling on tall portraits.
+  const prev = $('photo-preview');
+  if (prev._url) URL.revokeObjectURL(prev._url);
+  prev._url = URL.createObjectURL(file);
+  prev.src = prev._url;
+  prev.hidden = false;
+
+  // Sample GPS for the preview meta (and reuse on submit).
+  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  s.pendingPhoto.gps = gps ? { lat: gps.lat, lon: gps.lon } : null;
+  const meta = $('photo-preview-meta');
+  const gpsLine = gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : 'GPS unavailable';
+  meta.textContent = `${file.name || '(unnamed)'} · ${gpsLine}`;
+  meta.hidden = false;
 
   $('photo-comment').value = '';
   $('photo-comment').disabled = false;
@@ -150,6 +169,11 @@ function cancelPhotoForm() {
   hide('photo-form');
   $('photo-comment').value = '';
   $('photo-comment').disabled = true;
+  const prev = $('photo-preview');
+  if (prev._url) { URL.revokeObjectURL(prev._url); prev._url = null; }
+  prev.removeAttribute('src');
+  prev.hidden = true;
+  $('photo-preview-meta').hidden = true;
   s.pendingPhoto = null;
 }
 
@@ -157,12 +181,12 @@ async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
   if (!comment || !s.pendingPhoto) return;
 
-  const { file, t } = s.pendingPhoto;
+  const { file, t, gps } = s.pendingPhoto;
   const btn = $('photo-confirm');
   btn.disabled = true;
   btn.textContent = 'Checking…';
 
-  const proximity = await checkProximity();
+  const proximity = proximityFromGps(gps);
   btn.textContent = 'Add';
 
   if ($('photo-form').classList.contains('hidden')) {
@@ -173,18 +197,18 @@ async function submitPhoto() {
   if (proximity === 'out-of-range') {
     s.pendingPhoto = null;
     cancelPhotoForm();
-    s.pendingDraft = { type: 'photo', file, t, comment };
+    s.pendingDraft = { type: 'photo', file, t, comment, gps };
     logUi.showPendingDraft(`📷 "${comment}"`);
     return;
   }
 
   s.pendingPhoto = null;
   cancelPhotoForm();
-  await finishPhotoWrite(file, t, comment);
+  await finishPhotoWrite(file, t, comment, gps);
   await loadLog();
 }
 
-async function finishPhotoWrite(file, t, comment) {
+async function finishPhotoWrite(file, t, comment, gps) {
   // ref = YYYY-MM-DD_HHMMSS_<author>.<ext> — date-prefixed so unsyncedRefs(date)
   // can filter by prefix; matches PHASE4.md §4 example.
   const hms = t.slice(11, 19).replace(/:/g, '');
@@ -192,7 +216,6 @@ async function finishPhotoWrite(file, t, comment) {
   const ref = `${TODAY}_${hms}_${s.author}.${ext}`;
   const id  = `${hms}_${s.author}`;
 
-  const gps  = await geoloc.sample({ timeout: 3000, maximumAge: 60000 });
   const blob = await thumbs.generateFromFile(file);
   await thumbs.storeLocal(ref, blob);
   await timeline.appendLocal(TODAY, {
@@ -201,7 +224,7 @@ async function finishPhotoWrite(file, t, comment) {
     t,
     ref,
     comment,
-    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+    gps: gps || null,
   });
 }
 
@@ -252,10 +275,9 @@ function getLastCheckinGps() {
   return null;
 }
 
-async function checkProximity() {
+function proximityFromGps(currentGps) {
   const checkinGps = getLastCheckinGps();
   if (!checkinGps) return 'ok';
-  const currentGps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
   if (!currentGps) return 'ok';
   const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
   return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
@@ -308,8 +330,9 @@ async function autoSubmitDraft(draft) {
       type: 'note',
       t: nowLocalIso(),
       content: draft.text,
+      gps: draft.gps || null,
     });
   } else if (draft.type === 'photo') {
-    await finishPhotoWrite(draft.file, draft.t, draft.comment);
+    await finishPhotoWrite(draft.file, draft.t, draft.comment, draft.gps);
   }
 }
