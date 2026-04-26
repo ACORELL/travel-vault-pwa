@@ -1,6 +1,6 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Completed through Step 0 — plan confirmed, extraction not yet started**
+**Current state: Completed through Step 1 — `core/ui.js` extracted (leaf helpers only)**
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
@@ -299,8 +299,8 @@ identically.
 
 | # | Step | New / changed files | Rough size | Risk |
 |---|---|---|---|---|
-| 1 | **`core/ui.js`** — `$, $$, show, hide, pad, esc, fmtDate, nowHHMM, nowHHMMSS, setSyncStatus, showBanner, hideBanner`. `app.js` imports them. | new file ~50 lines | very low — pure leaf utilities |
-| 2 | **`core/state.js`** — `s` object, `TODAY`, `TOMORROW`, `IS_WEEKEND_TODAY`. `app.js` imports them. | new file ~25 lines | low — only `app.js` consumes for now |
+| 1 | **`core/ui.js`** — `$, $$, show, hide, pad, esc, fmtDate, nowHHMM, nowHHMMSS, showBanner, hideBanner`. `app.js` imports them. `setSyncStatus` deferred to Step 2 because it reads `s`. | new file ~45 lines | very low — pure leaf utilities |
+| 2 | **`core/state.js`** + `setSyncStatus` to `core/ui.js`. `core/state.js` exports `s`, `TODAY`, `TOMORROW`, `IS_WEEKEND_TODAY`. `setSyncStatus` moves into `core/ui.js` now that it can cleanly import `s`. | new file ~25 lines + ui.js +6 lines | low — small, isolated |
 | 3 | **`services/location.js`** — `sample({ timeout, maximumAge })`. Three call sites updated to pass their existing options. | new file ~15 lines | low — parameterized, behaviour-identical |
 | 4 | **`tabs/wiki/wiki-ui.js`** — `setupWikiTab` (wiki-only listeners), `renderWikiList`, `openArticle`, `buildHotelCard`, `TYPE_LABEL`, `TYPE_ORDER`. Capture listeners stay temporarily in `setupWikiTab` and move in step 6. | new file ~170 lines | medium — touches the wiki tab user flow |
 | 5 | **`tabs/wiki/today-strip.js`** — all strip code + helpers + dev test fixture. | new file ~500 lines | medium — biggest single move; one big sweep through 460 contiguous lines of `app.js` |
@@ -323,8 +323,8 @@ on every push that ships extraction commits to GitHub Pages.
 ## Phase 3b progress
 
 - **Step 0** — plan confirmed, extraction not yet started ✅
-- **Step 1** — `core/ui.js`
-- **Step 2** — `core/state.js`
+- **Step 1** — `core/ui.js` ✅
+- **Step 2** — `core/state.js` + `setSyncStatus` migration
 - **Step 3** — `services/location.js`
 - **Step 4** — `tabs/wiki/wiki-ui.js`
 - **Step 5** — `tabs/wiki/today-strip.js`
