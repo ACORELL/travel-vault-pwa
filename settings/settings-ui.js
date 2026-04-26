@@ -68,7 +68,10 @@ async function testConnection() {
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
       window.dispatchEvent(new CustomEvent('try-flush'));
     } else {
-      setStatus(`Connection error: ${e.message || e}`, 'error');
+      const kind = (e && e.constructor && e.constructor.name) || typeof e;
+      const msg  = (e && e.message) || String(e);
+      const online = navigator.onLine ? 'on' : 'off';
+      setStatus(`v48 fail [${kind}] ${msg} | net=${online}`, 'error');
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
     }
   }
