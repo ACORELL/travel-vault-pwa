@@ -6,38 +6,15 @@ import * as wiki from './services/wiki.js';
 import * as queue from './services/queue.js';
 import * as settings from './services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
-import { $, $$, show, hide, pad, esc, fmtDate, nowHHMM, nowHHMMSS, showBanner, hideBanner } from './core/ui.js';
+import { $, $$, show, hide, pad, esc, fmtDate, nowHHMM, nowHHMMSS, showBanner, hideBanner, setSyncStatus } from './core/ui.js';
+import { s, TODAY, TOMORROW, IS_WEEKEND_TODAY } from './core/state.js';
 
 // ---- Constants ----
-const TODAY = new Date().toISOString().slice(0, 10);
-const TOMORROW = (() => {
-  const d = new Date(TODAY + 'T12:00:00');
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-})();
-const IS_WEEKEND_TODAY = (() => {
-  const day = new Date(TODAY + 'T12:00:00').getDay();
-  return day === 0 || day === 6;
-})();
-
 const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
 
 const AUTHOR_COLORS = {
   N: { base: '#f9e4ec', tint: 'rgba(249,228,236,0.35)', badge: '#c2185b' },
   A: { base: '#e4eef9', tint: 'rgba(228,238,249,0.35)', badge: '#1565c0' },
-};
-
-// ---- State ----
-const s = {
-  author:        localStorage.getItem('tv-author'),
-  vault:         null,
-  syncStatus:    'offline',
-  logEntries:    [],
-  wikiPages:     [],
-  pendingPhoto:  null,   // { file, ts }
-  pendingDraft:  null,   // { type: 'note'|'photo', text?, file?, ts?, comment? }
-  viewedDate:    TODAY,
-  availableDays: [],
 };
 
 // ---- Boot ----
@@ -1304,14 +1281,6 @@ function setupTabs() {
     $$('.tab-btn').forEach(b   => b.classList.toggle('active', b.dataset.tab === tab));
     $$('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
   }));
-}
-
-// ---- Sync status ----
-function setSyncStatus(status) {
-  s.syncStatus = status;
-  const dot = $('sync-dot');
-  dot.className = `sync-dot ${status}`;
-  dot.title = status;
 }
 
 async function checkConflicts() {

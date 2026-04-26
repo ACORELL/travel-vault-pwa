@@ -1,6 +1,6 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Completed through Step 1 — `core/ui.js` extracted (leaf helpers only)**
+**Current state: Completed through Step 2 — `core/state.js` extracted, `setSyncStatus` migrated to `core/ui.js`**
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
@@ -324,7 +324,7 @@ on every push that ships extraction commits to GitHub Pages.
 
 - **Step 0** — plan confirmed, extraction not yet started ✅
 - **Step 1** — `core/ui.js` ✅
-- **Step 2** — `core/state.js` + `setSyncStatus` migration
+- **Step 2** — `core/state.js` + `setSyncStatus` migration ✅
 - **Step 3** — `services/location.js`
 - **Step 4** — `tabs/wiki/wiki-ui.js`
 - **Step 5** — `tabs/wiki/today-strip.js`

@@ -1,4 +1,5 @@
-// Shared DOM and formatter helpers. Used everywhere; depends on nothing.
+// Shared DOM, formatter, and sync-status helpers.
+import { s } from './state.js';
 
 // DOM lookups + class toggles
 export function $(id)     { return document.getElementById(id); }
@@ -16,3 +17,11 @@ export function fmtDate(d)  { const [y,m,day] = d.split('-').map(Number); return
 // Banner toggles — used by vault-banner and conflict-banner
 export function showBanner(id = 'vault-banner') { $(id).classList.add('show'); }
 export function hideBanner(id = 'vault-banner') { $(id).classList.remove('show'); }
+
+// Sync dot — single source of truth for s.syncStatus + the visual indicator
+export function setSyncStatus(status) {
+  s.syncStatus = status;
+  const dot = $('sync-dot');
+  dot.className = `sync-dot ${status}`;
+  dot.title = status;
+}
