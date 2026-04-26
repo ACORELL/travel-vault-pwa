@@ -8,7 +8,7 @@ import * as settings from './services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
 import { $, $$, show, hide, pad, esc, fmtDate, nowHHMM, nowHHMMSS, showBanner, hideBanner, setSyncStatus } from './core/ui.js';
 import { s, TODAY, TOMORROW, IS_WEEKEND_TODAY } from './core/state.js';
-import * as location from './services/location.js';
+import * as geoloc from './services/location.js';
 
 // ---- Constants ----
 const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
@@ -283,7 +283,7 @@ async function checkIn() {
   btn.textContent = 'Getting GPS…';
 
   const time = nowHHMM();
-  const gps = await location.sample({ timeout: 10000, maximumAge: 0 });
+  const gps = await geoloc.sample({ timeout: 10000, maximumAge: 0 });
 
   const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
   await writeLogLine(`${time} | ${s.author} | 📍${gpsPart}`);
@@ -1306,7 +1306,7 @@ function getLastCheckinGps() {
 }
 
 function sampleGpsForProximity() {
-  return location.sample({ timeout: 5000, maximumAge: 60000 });
+  return geoloc.sample({ timeout: 5000, maximumAge: 60000 });
 }
 
 // Returns 'ok' or 'out-of-range'. Never blocks on GPS failure.
@@ -1368,7 +1368,7 @@ async function saveRawCapture() {
   btn.disabled = true;
   btn.textContent = 'Saving…';
 
-  const gps = await location.sample({ timeout: 5000, maximumAge: 60000 });
+  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
 
   const now = new Date();
   const datePart = now.toISOString().slice(0, 10);
