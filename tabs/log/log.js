@@ -201,10 +201,9 @@ async function finishPhotoWrite(file, t, comment) {
 }
 
 export async function loadLog() {
-  // Step 4: own entries only. Step 5 swaps to timeline.getCombined to include
-  // the other author's synced entries.
-  const own = await timeline.getOwn(s.viewedDate);
-  s.logEntries = own.map(e => ({ ...e, author: s.author }));
+  // getCombined returns own (from local IDB) ∪ other-author (fetched + cached
+  // from the data repo), each entry tagged with `author`. Renders sorted by t.
+  s.logEntries = await timeline.getCombined(s.viewedDate);
   logUi.updateDayNavUI();
   logUi.updateActionBarState();
   await logUi.renderLog();
@@ -212,8 +211,11 @@ export async function loadLog() {
 
 // ---- Day navigation ----
 export async function loadAvailableDays() {
-  // Step 4: today only. Step 5 expands via timeline.listAvailableDates().
-  s.availableDays = [TODAY];
+  try {
+    s.availableDays = await timeline.listAvailableDates();
+  } catch {
+    s.availableDays = [TODAY];
+  }
 }
 
 async function navigateDay(dir) {
