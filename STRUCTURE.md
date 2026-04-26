@@ -1,6 +1,6 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Completed through Step 10 — `core/router.js` extracted (`setupTabs`); `app.js` is now bootstrap-only (~236 lines)**
+**Current state: Phase 3b complete — all 11 steps shipped. `app.js` is bootstrap-only (235 lines, down from 1607). All 11 module targets in place.**
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
@@ -332,5 +332,72 @@ on every push that ships extraction commits to GitHub Pages.
 - **Step 7** — `tabs/wiki/wiki.js` ✅ (`services/wiki.js` import in `app.js` replaced by `{ loadWiki } from './tabs/wiki/wiki.js'`)
 - **Step 8** — `tabs/log/log-ui.js` ✅ (`renderLog`, `AUTHOR_COLORS`, day-nav UI, pending-draft helpers, `checkinMapHtml`; callers in `app.js` re-pointed via `logUi.*`)
 - **Step 9** — `tabs/log/log.js` ✅ (handlers + FSA queue drain + log parsing + day-nav + proximity, `CHECKIN_PROXIMITY_THRESHOLD_M` moved; dead `enqueueLogEntry`/`getLogQueue`/`clearLogKeys` imports trimmed from `app.js`)
-- **Step 10** — `core/router.js` ✅ (`setupTabs`); dead `core/ui.js` imports (`$$`, `pad`, `esc`, `nowHHMM`, `nowHHMMSS`, `showBanner`) trimmed from `app.js`
-- **Step 11** — `app.js` cleanup verification
+- **Step 10** — `core/router.js` ✅ (`setupTabs`); dead `core/ui.js` imports (`pad`, `esc`, `nowHHMM`, `nowHHMMSS`, `showBanner`) trimmed from `app.js`
+- **Step 11** — `app.js` cleanup verification ✅ (restored `$$` import after author-btn regression; trimmed unused `TOMORROW`, `IS_WEEKEND_TODAY`, `logUi` from `app.js`)
+
+---
+
+## Final layout
+
+```
+pwa/phone/
+├── app.js                      Bootstrap only — init, vault setup, sync wiring, banners, reset (235 lines)
+├── core/
+│   ├── ui.js                   $/$$/show/hide, formatters, setSyncStatus, banner toggles
+│   ├── state.js                s + date constants
+│   └── router.js               setupTabs
+├── services/
+│   ├── github.js               (existing) GitHub Contents API
+│   ├── queue.js                (existing) IndexedDB offline queue
+│   ├── settings.js             (existing) localStorage source-of-truth
+│   ├── wiki.js                 (existing) loadWikiPages
+│   ├── location.js             NEW — parameterized GPS sample
+│   └── (vault.js etc. unchanged — still used by log tab; Phase 4 retires)
+├── settings/
+│   └── settings-ui.js          (existing)
+└── tabs/
+    ├── capture/capture-ui.js   raw capture sheet + initCaptureUi
+    ├── wiki/
+    │   ├── wiki.js             loadWiki (data loader)
+    │   ├── wiki-ui.js          list + article + hotel card
+    │   └── today-strip.js      today/tomorrow strip + helpers + dev test fixture
+    └── log/
+        ├── log.js              setup + handlers + queue + parsing + day-nav + proximity
+        └── log-ui.js           render + day-nav UI + pending-draft + check-in map
+
+Imports remaining in app.js: db.js (vault handle), vault.js (FSA setup), settings/settings-ui.js, tabs/wiki/wiki.js (loadWiki), services/{queue,settings,location}.js, core/{ui,state,router}.js, tabs/{wiki/wiki-ui,wiki/today-strip,capture/capture-ui,log/log}.js.
+```
+
+## Commit history
+
+```
+c14b7b3  Phase 3b Step 10: extract core/router.js (setupTabs); trim dead helper imports from app.js
+071baff  Phase 3b Step 9: extract tabs/log/log.js (handlers + queue + parsing + day-nav + proximity)
+4239a5d  Phase 3b Step 8: extract tabs/log/log-ui.js (render + day-nav + draft helpers)
+d58a008  Phase 3b Step 7: extract tabs/wiki/wiki.js (loadWiki data loader)
+5cdaace  Phase 3b Step 6: extract tabs/capture/capture-ui.js (raw capture sheet)
+9c429f6  Phase 3b Step 5: extract tabs/wiki/today-strip.js (strip render + helpers + test fixture)
+5dbceeb  Phase 3b Step 4: extract tabs/wiki/wiki-ui.js (list + article + hotel card)
+31dac79  Phase 3b Step 3 fix: rename location import to geoloc to avoid window.location shadowing
+355101a  Phase 3b Step 3: extract services/location.js (parameterized GPS sample)
+7015e78  Phase 3b Step 2: extract core/state.js, migrate setSyncStatus to core/ui.js
+f9ef7ae  Phase 3b Step 1: extract core/ui.js (DOM + formatter helpers)
+bf9b7b4  Add Phase 3b structural extraction plan
+```
+
+Step 11 commit will follow this.
+
+## Verification
+
+`node --check` passes for `app.js`, `core/{ui,state,router}.js`, `services/location.js`, and all four `tabs/*` files.
+
+End-to-end browser verification (still required before deploy):
+1. Load `pwa/phone/index.html` on PC Firefox or push to GH Pages with `CACHE` and `?v=` bumped to v35
+2. Capture path: text → wiki/raw via PUT (auth-error redirect, offline queue with auto-drain)
+3. Log: check-in, note, photo (FSA fallback)
+4. Wiki: list accordions, article view, hotel card
+5. Today strip: real data + `?dev=1` test fixture (3 cards)
+6. Sync dot transitions on toggling network
+7. Settings open/save/test connection still triggers queue drain
+
+The PWA is currently at SW cache `tv-phone-v34`. Deploy bumps to v35 (per CLAUDE.md PWA Deployment rules — bump CACHE in sw.js AND `?v=` in app.js's SW registration in lockstep).

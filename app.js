@@ -5,13 +5,12 @@ import { loadWiki } from './tabs/wiki/wiki.js';
 import * as queue from './services/queue.js';
 import * as settings from './services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
-import { $, show, hide, fmtDate, hideBanner, setSyncStatus } from './core/ui.js';
-import { s, TODAY, TOMORROW, IS_WEEKEND_TODAY } from './core/state.js';
+import { $, $$, show, hide, fmtDate, hideBanner, setSyncStatus } from './core/ui.js';
+import { s, TODAY } from './core/state.js';
 import * as geoloc from './services/location.js';
 import * as wikiUi from './tabs/wiki/wiki-ui.js';
 import * as todayStrip from './tabs/wiki/today-strip.js';
 import * as captureUi from './tabs/capture/capture-ui.js';
-import * as logUi from './tabs/log/log-ui.js';
 import * as logTab from './tabs/log/log.js';
 import { setupTabs } from './core/router.js';
 
