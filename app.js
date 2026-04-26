@@ -12,7 +12,7 @@ import * as logTab from './tabs/log/log.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 43; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 44; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
 // Visible on every screen for at-a-glance "did the new build land?" debugging.
@@ -23,8 +23,20 @@ const VERSION = 43; // bump in lockstep with sw.js CACHE on every push
 
 async function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=' + VERSION).catch(() => {});
+    // updateViaCache: 'none' tells the browser to bypass HTTP cache for sw.js
+    // itself, so a content change on the deployed file always triggers a new
+    // SW install (instead of waiting for the default 24-hour update cycle).
+    const reg = await navigator.serviceWorker.register('./sw.js?v=' + VERSION, {
+      updateViaCache: 'none',
+    }).catch(() => null);
     navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+    if (reg) {
+      reg.update().catch(() => {});
+      // Re-check whenever the app comes back to foreground.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }
   }
   if (navigator.storage?.persist) {
     navigator.storage.persist().catch(() => {});
