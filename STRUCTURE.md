@@ -1,6 +1,6 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Completed through Step 9 — `tabs/log/log.js` extracted (handlers + queue drain + parsing + day-nav + proximity)**
+**Current state: Completed through Step 10 — `core/router.js` extracted (`setupTabs`); `app.js` is now bootstrap-only (~236 lines)**
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
@@ -332,5 +332,5 @@ on every push that ships extraction commits to GitHub Pages.
 - **Step 7** — `tabs/wiki/wiki.js` ✅ (`services/wiki.js` import in `app.js` replaced by `{ loadWiki } from './tabs/wiki/wiki.js'`)
 - **Step 8** — `tabs/log/log-ui.js` ✅ (`renderLog`, `AUTHOR_COLORS`, day-nav UI, pending-draft helpers, `checkinMapHtml`; callers in `app.js` re-pointed via `logUi.*`)
 - **Step 9** — `tabs/log/log.js` ✅ (handlers + FSA queue drain + log parsing + day-nav + proximity, `CHECKIN_PROXIMITY_THRESHOLD_M` moved; dead `enqueueLogEntry`/`getLogQueue`/`clearLogKeys` imports trimmed from `app.js`)
-- **Step 10** — `core/router.js`
+- **Step 10** — `core/router.js` ✅ (`setupTabs`); dead `core/ui.js` imports (`$$`, `pad`, `esc`, `nowHHMM`, `nowHHMMSS`, `showBanner`) trimmed from `app.js`
 - **Step 11** — `app.js` cleanup verification
