@@ -11,14 +11,10 @@ import * as geoloc from './services/location.js';
 import * as wikiUi from './tabs/wiki/wiki-ui.js';
 import * as todayStrip from './tabs/wiki/today-strip.js';
 import * as captureUi from './tabs/capture/capture-ui.js';
+import * as logUi from './tabs/log/log-ui.js';
 
 // ---- Constants ----
 const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
-
-const AUTHOR_COLORS = {
-  N: { base: '#f9e4ec', tint: 'rgba(249,228,236,0.35)', badge: '#c2185b' },
-  A: { base: '#e4eef9', tint: 'rgba(228,238,249,0.35)', badge: '#1565c0' },
-};
 
 // ---- Boot ----
 const VERSION = 34; // bump in lockstep with sw.js CACHE on every push
@@ -295,7 +291,7 @@ async function checkIn() {
   // If a draft was pending proximity check, auto-submit it now under this new check-in
   const draft = s.pendingDraft;
   if (draft) {
-    hidePendingDraft();         // clears s.pendingDraft, restores add-bar
+    logUi.hidePendingDraft();   // clears s.pendingDraft, restores add-bar
     await autoSubmitDraft(draft);
   }
 
@@ -332,7 +328,7 @@ async function submitNote() {
     hide('note-form');
     $('note-text').value = '';
     s.pendingDraft = { type: 'note', text };
-    showPendingDraft(text);
+    logUi.showPendingDraft(text);
     return;
   }
 
@@ -396,7 +392,7 @@ async function submitPhoto() {
     s.pendingPhoto = null;
     cancelPhotoForm();
     s.pendingDraft = { type: 'photo', file, ts, comment };
-    showPendingDraft(`📷 "${comment}"`);
+    logUi.showPendingDraft(`📷 "${comment}"`);
     return;
   }
 
@@ -461,9 +457,9 @@ async function loadLog() {
     }
   }
   s.logEntries.sort((a, b) => a.time.localeCompare(b.time));
-  updateDayNavUI();
-  updateActionBarState();
-  renderLog();
+  logUi.updateDayNavUI();
+  logUi.updateActionBarState();
+  logUi.renderLog();
 }
 
 function parseLogMd(text) {
@@ -492,59 +488,6 @@ function parseLogLine(line) {
   return { time: time.trim(), author: author.trim(), type: 'text', text: body };
 }
 
-async function renderLog() {
-  const list = $('log-list');
-  if (!s.logEntries.length) {
-    const msg = s.viewedDate === TODAY ? 'No entries yet' : 'No entries for this day';
-    list.innerHTML = `<li class="empty-state">${msg}</li>`;
-    return;
-  }
-  list.innerHTML = '';
-
-  let groupAuthor = null;
-
-  for (const entry of s.logEntries) {
-    const li = document.createElement('li');
-    const timeEl = `<span class="entry-time">${entry.time}</span>`;
-    const ec = AUTHOR_COLORS[entry.author] || { base: '#f5f5f5', tint: 'rgba(245,245,245,0.35)', badge: '#999' };
-
-    if (entry.type === 'checkin') {
-      groupAuthor = entry.author;
-      li.className = 'log-entry checkin';
-      li.style.background = ec.base;
-      // Check-in: badge far left, then timestamp, then content
-      const badgeHtml = `<span class="author-badge" style="background:${ec.badge};color:#fff">${entry.author}</span>`;
-      const locationHtml = entry.gps
-        ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
-        : '<span class="checkin-no-gps">Location unavailable</span>';
-      li.innerHTML = `${badgeHtml}${timeEl}<div class="entry-body">
-        <span class="checkin-label">📍 Checked in</span>${locationHtml}
-      </div>`;
-    } else {
-      // Notes and photos: no badge — author is communicated by group color
-      li.className = 'log-entry';
-      if (groupAuthor) {
-        li.style.background = AUTHOR_COLORS[groupAuthor]?.tint || '';
-      }
-
-      if (entry.type === 'photo') {
-        let thumb = '';
-        if (s.vault && entry.photo) {
-          const url = await vault.getPhotoUrl(s.vault, s.viewedDate, entry.photo);
-          if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
-        }
-        li.innerHTML = `${timeEl}<div class="entry-body">
-          <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
-          <p class="entry-comment">${esc(entry.comment)}</p>
-        </div>`;
-      } else {
-        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>`;
-      }
-    }
-    list.appendChild(li);
-  }
-}
-
 // ---- Day navigation ----
 
 async function loadAvailableDays() {
@@ -565,38 +508,6 @@ async function navigateDay(dir) {
   if (newIdx < 0 || newIdx >= s.availableDays.length) return;
   s.viewedDate = s.availableDays[newIdx];
   await loadLog();
-}
-
-function updateDayNavUI() {
-  const idx = s.availableDays.indexOf(s.viewedDate);
-  $('day-nav-label').textContent = s.viewedDate === TODAY ? 'Today' : fmtDate(s.viewedDate);
-  $('day-prev').disabled = idx <= 0;
-  $('day-next').disabled = idx < 0 || idx >= s.availableDays.length - 1;
-}
-
-function updateActionBarState() {
-  const isToday = s.viewedDate === TODAY;
-  const hasCheckin = s.logEntries.some(e => e.type === 'checkin');
-  const hint = $('add-bar-hint');
-
-  if (!isToday) {
-    $('btn-checkin').disabled = true;
-    $('btn-add-note').disabled = true;
-    $('btn-add-photo').disabled = true;
-    hint.textContent = 'Past day — read only';
-    hint.style.display = 'block';
-  } else {
-    $('btn-checkin').disabled = false;
-    $('btn-add-note').disabled = !hasCheckin;
-    $('btn-add-photo').disabled = !hasCheckin;
-    if (hasCheckin) {
-      hint.textContent = '';
-      hint.style.display = 'none';
-    } else {
-      hint.textContent = 'Check in first to add notes and photos';
-      hint.style.display = 'block';
-    }
-  }
 }
 
 // ---- Wiki tab ----
@@ -680,46 +591,8 @@ async function autoSubmitDraft(draft) {
   }
 }
 
-function showPendingDraft(previewText) {
-  $('pending-preview').textContent = previewText;
-  $('add-bar').style.display = 'none';
-  $('add-bar-hint').style.display = 'none';
-  $('pending-draft').style.display = 'block';
-}
-
-function hidePendingDraft() {
-  s.pendingDraft = null;
-  $('pending-draft').style.display = 'none';
-  $('add-bar').style.display = '';       // reverts to flex via .add-bar CSS
-  updateActionBarState();                // re-evaluates hint and button states
-}
-
 // ---- Raw capture ----
 
-
-// ---- Helpers ----
-function checkinMapHtml(lat, lon) {
-  const zoom = 15;
-  const n = 1 << zoom;
-  const xt = (lon + 180) / 360 * n;
-  const latR = lat * Math.PI / 180;
-  const yt = (1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n;
-  const tx = Math.floor(xt), ty = Math.floor(yt);
-  const fx = xt - tx, fy = yt - ty;
-  const cw = 200, ch = 120;
-  const l0 = Math.round(cw / 2 - fx * 256);
-  const t0 = Math.round(ch / 2 - fy * 256);
-  const grid = [
-    [tx,   ty,   l0,       t0      ],
-    [tx+1, ty,   l0 + 256, t0      ],
-    [tx,   ty+1, l0,       t0 + 256],
-    [tx+1, ty+1, l0 + 256, t0 + 256],
-  ];
-  const imgs = grid.map(([x, y, l, t]) =>
-    `<img src="https://tile.openstreetmap.org/${zoom}/${x}/${y}.png" class="checkin-map-tile" style="left:${l}px;top:${t}px" alt="" crossorigin="anonymous">`
-  ).join('');
-  return `<div class="checkin-map-wrap">${imgs}<div class="checkin-map-pin">📍</div></div>`;
-}
 
 
 $('reset-btn-1').addEventListener('click', resetApp);

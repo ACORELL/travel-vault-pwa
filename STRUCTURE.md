@@ -1,6 +1,6 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Completed through Step 7 — `tabs/wiki/wiki.js` extracted (data loading)**
+**Current state: Completed through Step 8 — `tabs/log/log-ui.js` extracted (render + day-nav UI + pending-draft + check-in map)**
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
@@ -330,7 +330,7 @@ on every push that ships extraction commits to GitHub Pages.
 - **Step 5** — `tabs/wiki/today-strip.js` ✅ (dev test button now uses `todayStrip.renderTestStrip`; capture listeners still in `wireWikiTabExternals` for Step 6)
 - **Step 6** — `tabs/capture/capture-ui.js` ✅ (capture listeners moved into `initCaptureUi`; dev test-button hook reduced to `maybeAddTestStripButton`; `putFile`/`GitHubAuthError` import dropped from `app.js` as dead)
 - **Step 7** — `tabs/wiki/wiki.js` ✅ (`services/wiki.js` import in `app.js` replaced by `{ loadWiki } from './tabs/wiki/wiki.js'`)
-- **Step 8** — `tabs/log/log-ui.js`
+- **Step 8** — `tabs/log/log-ui.js` ✅ (`renderLog`, `AUTHOR_COLORS`, day-nav UI, pending-draft helpers, `checkinMapHtml`; callers in `app.js` re-pointed via `logUi.*`)
 - **Step 9** — `tabs/log/log.js`
 - **Step 10** — `core/router.js`
 - **Step 11** — `app.js` cleanup verification
