@@ -34,13 +34,15 @@ export async function renderLog() {
     const timeEl = `<span class="entry-time">${entryHHMM(entry)}</span>`;
     const ec = AUTHOR_COLORS[entry.author] || { base: '#f5f5f5', tint: 'rgba(245,245,245,0.35)', badge: '#999' };
 
+    const locTag = entry.gps ? '<span class="entry-loc">Location ✓</span>' : '';
+
     if (entry.type === 'checkin') {
       groupAuthor = entry.author;
       li.className = 'log-entry checkin';
       li.style.background = ec.base;
       const badgeHtml = `<span class="author-badge" style="background:${ec.badge};color:#fff">${entry.author}</span>`;
       const locationHtml = entry.gps
-        ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
+        ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}${locTag}`
         : '<span class="checkin-no-gps">Location unavailable</span>';
       li.innerHTML = `${badgeHtml}${timeEl}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
@@ -62,10 +64,11 @@ export async function renderLog() {
         li.innerHTML = `${timeEl}<div class="entry-body">
           <div class="entry-photo-wrap">${thumb}</div>
           <p class="entry-comment">${esc(entry.comment || '')}</p>
+          ${locTag}
         </div>`;
       } else {
         // type === 'note'
-        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.content || '')}</div>`;
+        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.content || '')}${locTag ? `<br>${locTag}` : ''}</div>`;
       }
     }
     list.appendChild(li);
