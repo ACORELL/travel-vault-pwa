@@ -61,6 +61,9 @@ function scaledDims(w, h) {
 
 // ─── Local blob store ─────────────────────────────────────────────────────────
 export async function storeLocal(ref, blob) {
+  // Invalidate any cached object URL for this ref — after a photo replace
+  // the new blob would otherwise still render through the old URL.
+  invalidateUrl(ref);
   const store = await tx(STORE_BLOBS, 'readwrite');
   return new Promise((resolve, reject) => {
     const req = store.put({ ref, blob });
@@ -92,16 +95,20 @@ export async function getLocalUrl(ref) {
   return url;
 }
 
-// ─── Local cleanup ────────────────────────────────────────────────────────────
-// Used by tabs/log/log.js when an entry or appendment with a `ref` is deleted.
-// Failure to release the URL or remove the blob is non-fatal (the next reload
-// would simply not see this ref any more).
-export async function deleteLocal(ref) {
+function invalidateUrl(ref) {
   const url = _urls.get(ref);
   if (url) {
     URL.revokeObjectURL(url);
     _urls.delete(ref);
   }
+}
+
+// ─── Local cleanup ────────────────────────────────────────────────────────────
+// Used by tabs/log/log.js when an entry or appendment with a `ref` is deleted.
+// Failure to release the URL or remove the blob is non-fatal (the next reload
+// would simply not see this ref any more).
+export async function deleteLocal(ref) {
+  invalidateUrl(ref);
   const store = await tx(STORE_BLOBS, 'readwrite');
   return new Promise((resolve, reject) => {
     const req = store.delete(ref);

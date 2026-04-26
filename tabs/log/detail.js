@@ -24,6 +24,40 @@ export function setupDetailView() {
   // colour map, so the event keeps the dependency one-way.
   window.addEventListener('entry-detail-open', e => openDetail(e.detail.id));
 
+  // Action bar (parent) — Edit / Delete / Delete-checkin (Step 8).
+  $('entry-detail-actions').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn || btn.disabled) return;
+    const entryId = s.viewingEntry;
+    if (!entryId) return;
+    const action = btn.dataset.action;
+    if (action === 'edit') {
+      closeDetail();
+      window.dispatchEvent(new CustomEvent('entry-edit-requested', { detail: { id: entryId } }));
+    } else if (action === 'delete') {
+      window.dispatchEvent(new CustomEvent('entry-delete-requested', { detail: { id: entryId } }));
+    } else if (action === 'delete-checkin') {
+      window.dispatchEvent(new CustomEvent('checkin-delete-requested', { detail: { id: entryId } }));
+    }
+  });
+
+  // Per-appendment Edit / Delete (Step 8) and the bottom-bar add buttons
+  // (Step 9 wires +Comment / +Photo).
+  $('entry-detail-appendments').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn || btn.disabled) return;
+    const appId = btn.dataset.appId;
+    if (!appId || !s.viewingEntry) return;
+    const parentId = s.viewingEntry;
+    const action = btn.dataset.action;
+    if (action === 'edit-app') {
+      closeDetail();
+      window.dispatchEvent(new CustomEvent('appendment-edit-requested', { detail: { parentId, appId } }));
+    } else if (action === 'delete-app') {
+      window.dispatchEvent(new CustomEvent('appendment-delete-requested', { detail: { parentId, appId } }));
+    }
+  });
+
   window.addEventListener('day-changed', e => {
     if (e.detail?.date !== s.viewedDate || !s.viewingEntry) return;
     const stillExists = s.logEntries.some(x => x.id === s.viewingEntry);
@@ -79,13 +113,16 @@ async function parentHtml(entry) {
 }
 
 function parentActionsHtml(entry) {
-  // D6: only the original author can edit. D7: either author can delete.
-  // Buttons are disabled placeholders here; Step 8 enables and wires them.
+  // D6: only the original author can edit (and check-ins aren't editable —
+  // GPS auto-sets, no content/comment to change). D7: either author can
+  // delete; check-in deletes cascade through the next-checkin window.
   const isOwn = entry.author === s.author;
-  const editBtn = isOwn
-    ? '<button class="entry-detail-action-edit" data-action="edit" disabled>Edit</button>'
+  const editable = entry.type !== 'checkin';
+  const editBtn = (isOwn && editable)
+    ? '<button class="entry-detail-action-edit" data-action="edit">Edit</button>'
     : '';
-  const deleteBtn = '<button class="entry-detail-action-delete" data-action="delete" disabled>Delete</button>';
+  const isCheckin = entry.type === 'checkin';
+  const deleteBtn = `<button class="entry-detail-action-delete" data-action="${isCheckin ? 'delete-checkin' : 'delete'}">Delete</button>`;
   return `${editBtn}${deleteBtn}`;
 }
 
@@ -116,9 +153,9 @@ async function singleAppendmentHtml(app) {
   }
 
   const editBtn = isOwn
-    ? `<button data-action="edit-app" data-app-id="${esc(app.id)}" disabled>Edit</button>`
+    ? `<button data-action="edit-app" data-app-id="${esc(app.id)}">Edit</button>`
     : '';
-  const deleteBtn = `<button data-action="delete-app" data-app-id="${esc(app.id)}" disabled>Delete</button>`;
+  const deleteBtn = `<button data-action="delete-app" data-app-id="${esc(app.id)}">Delete</button>`;
 
   return `<div class="appendment" style="background:${c.tint}" data-app-id="${esc(app.id)}">
     <span class="author-badge" style="background:${c.badge};color:#fff">${app.author}</span>
