@@ -128,7 +128,7 @@
     .fshdr .confirm { color: #1a1a1a; font-weight: 600; }
     .fshdr .confirm:disabled { color: var(--muted); }
     .fsbody { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-    .photo-preview-img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; background: var(--surface); }
+    .photo-preview-img { display: block; width: 100%; height: auto; max-height: 50vh; object-fit: contain; border-radius: 10px; background: var(--surface); }
     .photo-preview-img.hidden { display: none; }
     .photo-preview-status { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; min-height: 14px; word-break: break-all; }
     #photo-pick-area { width: 100%; aspect-ratio: 4/3; background: var(--surface); border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
