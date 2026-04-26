@@ -127,7 +127,8 @@
     .fshdr .confirm { color: #1a1a1a; font-weight: 600; }
     .fshdr .confirm:disabled { color: var(--muted); }
     .fsbody { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-    .photo-preview-img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; background: var(--surface); display: none; }
+    .photo-preview-img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; background: var(--surface); }
+    .photo-preview-img:not([src]), .photo-preview-img[src=""] { display: none; }
     #photo-pick-area { width: 100%; aspect-ratio: 4/3; background: var(--surface); border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
     #photo-pick-area span { color: var(--muted); font-size: 14px; }
     textarea { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; resize: none; background: #fff; -webkit-appearance: none; }

@@ -110,7 +110,7 @@ async function submitNote() {
   btn.disabled = true;
   btn.textContent = 'Checking…';
 
-  const proximity = await checkProximity();
+  const { status: proximity } = await checkProximity();
 
   btn.textContent = 'Add';
 
@@ -140,7 +140,6 @@ async function onPhotoSelected(e) {
 
   const prev = $('photo-preview');
   prev.src = URL.createObjectURL(file);
-  prev.style.display = 'block';
   $('photo-pick-area').style.display = 'none';
   $('photo-comment').disabled = false;
   $('photo-comment').value = '';
@@ -153,8 +152,7 @@ function cancelPhotoForm() {
   hide('photo-form');
   const prev = $('photo-preview');
   if (prev.src) URL.revokeObjectURL(prev.src);
-  prev.src = '';
-  prev.style.display = 'none';
+  prev.removeAttribute('src');
   $('photo-pick-area').style.display = 'flex';
   $('photo-comment').value = '';
   $('photo-comment').disabled = true;
@@ -171,7 +169,7 @@ async function submitPhoto() {
   btn.disabled = true;
   btn.textContent = 'Checking…';
 
-  const proximity = await checkProximity();
+  const { status: proximity, gps } = await checkProximity();
 
   btn.textContent = 'Add';
 
@@ -184,24 +182,25 @@ async function submitPhoto() {
   if (proximity === 'out-of-range') {
     s.pendingPhoto = null;
     cancelPhotoForm();
-    s.pendingDraft = { type: 'photo', file, ts, comment };
+    s.pendingDraft = { type: 'photo', file, ts, comment, gps };
     logUi.showPendingDraft(`📷 "${comment}"`);
     return;
   }
 
   s.pendingPhoto = null;
   cancelPhotoForm();
-  await finishPhotoWrite(file, ts, comment);
+  await finishPhotoWrite(file, ts, comment, gps);
   await loadLog();
 }
 
-async function finishPhotoWrite(file, ts, comment) {
+async function finishPhotoWrite(file, ts, comment, gps) {
   const hms  = ts.replace(/:/g, '-');
   const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const base = `${hms}_${s.author}`;
   const name = await resolvePhotoName(base, ext);
   const time = ts.slice(0, 5);
-  const line = `${time} | ${s.author} | 📷 ${name} | "${comment}"`;
+  const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
+  const line = `${time} | ${s.author} | 📷 ${name}${gpsPart} | "${comment}"`;
 
   if (s.vault) {
     try {
@@ -274,9 +273,13 @@ function parseLogLine(line) {
     return { time: time.trim(), author: author.trim(), type: 'checkin', gps };
   }
   if (body.startsWith('📷')) {
-    const m = body.match(/📷\s*(\S+)\s*\|\s*"?(.+?)"?\s*$/);
-    return m ? { time: time.trim(), author: author.trim(), type: 'photo', photo: m[1], comment: m[2] }
-             : { time: time.trim(), author: author.trim(), type: 'photo', photo: '', comment: '' };
+    // Backward compatible: GPS chunk is optional. 📷 name [| lat,lon] | "comment"
+    const m = body.match(/📷\s*(\S+)(?:\s*\|\s*([-\d.]+),([-\d.]+))?\s*\|\s*"?(.+?)"?\s*$/);
+    if (m) {
+      const gps = m[2] && m[3] ? { lat: parseFloat(m[2]), lon: parseFloat(m[3]) } : null;
+      return { time: time.trim(), author: author.trim(), type: 'photo', photo: m[1], gps, comment: m[4] };
+    }
+    return { time: time.trim(), author: author.trim(), type: 'photo', photo: '', gps: null, comment: '' };
   }
   return { time: time.trim(), author: author.trim(), type: 'text', text: body };
 }
@@ -337,14 +340,14 @@ function sampleGpsForProximity() {
   return geoloc.sample({ timeout: 5000, maximumAge: 60000 });
 }
 
-// Returns 'ok' or 'out-of-range'. Never blocks on GPS failure.
+// Returns { status, gps }. status is 'ok' or 'out-of-range'. gps is the current
+// sample (or null if unavailable) — callers attach it to photo entries.
 async function checkProximity() {
-  const checkinGps = getLastCheckinGps();
-  if (!checkinGps) return 'ok';               // no GPS reference — can't check
   const currentGps = await sampleGpsForProximity();
-  if (!currentGps) return 'ok';               // GPS unavailable — don't block
+  const checkinGps = getLastCheckinGps();
+  if (!checkinGps || !currentGps) return { status: 'ok', gps: currentGps };
   const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
-  return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
+  return { status: dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range', gps: currentGps };
 }
 
 // Writes a pending draft entry to the log without calling loadLog().
@@ -353,6 +356,6 @@ async function autoSubmitDraft(draft) {
   if (draft.type === 'note') {
     await writeLogLine(`${nowHHMM()} | ${s.author} | ${draft.text}`);
   } else if (draft.type === 'photo') {
-    await finishPhotoWrite(draft.file, draft.ts, draft.comment);
+    await finishPhotoWrite(draft.file, draft.ts, draft.comment, draft.gps);
   }
 }
