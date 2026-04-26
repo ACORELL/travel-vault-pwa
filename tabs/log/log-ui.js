@@ -9,6 +9,7 @@
 import { $, esc, fmtDate } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
 import * as thumbs from '../../services/thumbs.js';
+import { pendingIds, pendingThumbRefs } from '../../services/ops.js';
 
 export const AUTHOR_COLORS = {
   N: { base: '#f9e4ec', tint: 'rgba(249,228,236,0.35)', badge: '#c2185b' },
@@ -36,7 +37,7 @@ async function thumbHtml(ref, isOwn) {
   return '<span class="photo-icon">📷</span>';
 }
 
-async function appendmentHtml(app) {
+async function appendmentHtml(app, status) {
   const c = authorColor(app.author);
   const time = (app.t || '').slice(11, 16);
   let body;
@@ -51,8 +52,21 @@ async function appendmentHtml(app) {
   return `<div class="appendment" style="background:${c.tint}" data-app-id="${esc(app.id)}">
     ${authorBadgeHtml(app.author)}
     <span class="appendment-time">${time}</span>
+    ${debugBadgeHtml(app, status)}
     <div class="appendment-body">${body}</div>
   </div>`;
+}
+
+const STATUS_GLYPH = { synced: '✓', pending: '⏳', thumb: '📤' };
+
+function statusFor(item, pIds, pRefs) {
+  if (pIds.has(item.id)) return 'pending';
+  if (item.ref && pRefs.has(item.ref)) return 'thumb';
+  return 'synced';
+}
+
+function debugBadgeHtml(item, status) {
+  return `<span class="debug-tag debug-${status}" title="author=${item.author} status=${status} id=${esc(item.id)}${item.ref ? ' ref=' + esc(item.ref) : ''}">${item.author}·${STATUS_GLYPH[status]}</span>`;
 }
 
 export async function renderLog() {
@@ -64,6 +78,10 @@ export async function renderLog() {
   }
   list.innerHTML = '';
 
+  // Pull pending-op state once per render so each entry's debug badge
+  // reflects the same snapshot of the queue.
+  const [pIds, pRefs] = await Promise.all([pendingIds(), pendingThumbRefs()]);
+
   let groupAuthor = null;
 
   for (const entry of s.logEntries) {
@@ -72,6 +90,8 @@ export async function renderLog() {
     const ec = authorColor(entry.author);
     const timeEl = `<span class="entry-time">${entryHHMM(entry)}</span>`;
     const locTag = entry.gps ? '<span class="entry-loc">Location ✓</span>' : '';
+    const status = statusFor(entry, pIds, pRefs);
+    const debugTag = debugBadgeHtml(entry, status);
 
     if (entry.type === 'checkin') {
       groupAuthor = entry.author;
@@ -80,7 +100,7 @@ export async function renderLog() {
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}${locTag}`
         : '<span class="checkin-no-gps">Location unavailable</span>';
-      li.innerHTML = `${authorBadgeHtml(entry.author)}${timeEl}<div class="entry-body">
+      li.innerHTML = `${authorBadgeHtml(entry.author)}${timeEl}${debugTag}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else {
@@ -96,7 +116,7 @@ export async function renderLog() {
       } else {
         body = `${esc(entry.content || '')}${locTag ? `<br>${locTag}` : ''}`;
       }
-      li.innerHTML = `${timeEl}<div class="entry-body">${body}</div>`;
+      li.innerHTML = `${timeEl}${debugTag}<div class="entry-body">${body}</div>`;
     }
 
     const apps = entry.appendments || [];
@@ -104,7 +124,10 @@ export async function renderLog() {
       const appsBox = document.createElement('div');
       appsBox.className = 'entry-appendments';
       let appsInner = '';
-      for (const app of apps) appsInner += await appendmentHtml(app);
+      for (const app of apps) {
+        const appStatus = statusFor(app, pIds, pRefs);
+        appsInner += await appendmentHtml(app, appStatus);
+      }
       appsBox.innerHTML = appsInner;
       li.appendChild(appsBox);
     }

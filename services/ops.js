@@ -75,6 +75,56 @@ export async function count() {
   });
 }
 
+// Set of all ids (parent entry ids and appendment ids) referenced by the
+// currently-queued ops. Used by the log UI to show a "pending sync" badge
+// on entries waiting for replay.
+export async function pendingIds() {
+  const ids = new Set();
+  let items = [];
+  try { ({ items } = await readAll()); } catch { return ids; }
+  for (const op of items) {
+    const { kind, args } = op;
+    switch (kind) {
+      case 'add-entry':
+      case 'edit-entry':
+        if (args?.entry?.id) ids.add(args.entry.id);
+        if (args?.id)        ids.add(args.id);
+        break;
+      case 'delete-entry':
+        if (args?.id) ids.add(args.id);
+        break;
+      case 'add-appendment':
+        if (args?.parentId)        ids.add(args.parentId);
+        if (args?.appendment?.id)  ids.add(args.appendment.id);
+        break;
+      case 'edit-appendment':
+      case 'delete-appendment':
+        if (args?.parentId) ids.add(args.parentId);
+        if (args?.appId)    ids.add(args.appId);
+        break;
+      case 'delete-many':
+        for (const id of args?.ids || []) ids.add(id);
+        break;
+    }
+  }
+  return ids;
+}
+
+// Set of thumb refs referenced by put-thumb / delete-thumb ops. Photo
+// entries whose own id isn't pending may still have an in-flight thumb
+// upload (or pending remote delete).
+export async function pendingThumbRefs() {
+  const refs = new Set();
+  let items = [];
+  try { ({ items } = await readAll()); } catch { return refs; }
+  for (const op of items) {
+    if (op.kind === 'put-thumb' || op.kind === 'delete-thumb') {
+      if (op.args?.ref) refs.add(op.args.ref);
+    }
+  }
+  return refs;
+}
+
 export async function clear() {
   const store = await tx('readwrite');
   await new Promise((resolve, reject) => {
