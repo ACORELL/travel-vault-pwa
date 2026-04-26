@@ -81,6 +81,20 @@ export async function getFile(path) {
   return { content: decodeBase64(json.content), sha: json.sha };
 }
 
+// Fetch a binary file (e.g. a thumbnail blob) via the Contents API.
+// GitHub returns base64 in the `content` field for files <= 1 MB. Our
+// thumbnails are ~200 KB so we stay comfortably under that.
+export async function getBinary(path, mime = 'application/octet-stream') {
+  const { token, repo } = auth();
+  const res = await fetch(url(repo, path), { headers: headers(token) });
+  if (!res.ok) throwForStatus(res, path);
+  const json = await res.json();
+  const bin = atob((json.content || '').replace(/\n/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: mime }), sha: json.sha };
+}
+
 export async function listDir(path) {
   const { token, repo } = auth();
   const res = await fetch(url(repo, path), { headers: headers(token) });
@@ -105,7 +119,9 @@ export async function putFile(path, content, message, sha) {
   const { token, repo } = auth();
   let res = await putOnce(repo, token, path, content, message, sha);
 
-  // Conflict: re-fetch sha and retry once.
+  // Conflict: re-fetch sha and retry once with the same content. Used by
+  // create-only callers (queue.js raw captures, thumb uploads) where the
+  // local content is authoritative — second device just hasn't seen it yet.
   if (res.status === 409 || res.status === 422) {
     let currentSha;
     try {
@@ -120,6 +136,21 @@ export async function putFile(path, content, message, sha) {
     }
   }
 
+  if (!res.ok) throwForStatus(res, path);
+  const json = await res.json();
+  return { sha: json.content?.sha };
+}
+
+// putFileExact: PUT with sha and throw GitHubConflictError on the first
+// 409/422. timeline.js atomicEdit needs this so it can refetch the file and
+// re-run its mutator on the fresh remote content rather than overwriting
+// another device's concurrent write with stale local content.
+export async function putFileExact(path, content, message, sha) {
+  const { token, repo } = auth();
+  const res = await putOnce(repo, token, path, content, message, sha);
+  if (res.status === 409 || res.status === 422) {
+    throw new GitHubConflictError(`${res.status} on ${path}`);
+  }
   if (!res.ok) throwForStatus(res, path);
   const json = await res.json();
   return { sha: json.content?.sha };
