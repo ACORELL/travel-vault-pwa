@@ -1,7 +1,7 @@
 import { saveVaultHandle, getVaultHandle, enqueueLogEntry, getLogQueue, clearLogKeys } from './db.js';
 import * as vault from './vault.js';
 import * as settingsUi from './settings/settings-ui.js';
-import * as wiki from './services/wiki.js';
+import { loadWiki } from './tabs/wiki/wiki.js';
 import * as queue from './services/queue.js';
 import * as settings from './services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
@@ -613,14 +613,6 @@ function maybeAddTestStripButton() {
   $('wiki-cap-row').prepend(testBtn);
 }
 
-async function loadWiki() {
-  if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO)) return;
-  try {
-    s.wikiPages = await wiki.loadWikiPages();
-    todayStrip.renderTodayStrip();
-    wikiUi.renderWikiList('');
-  } catch {}
-}
 
 
 
