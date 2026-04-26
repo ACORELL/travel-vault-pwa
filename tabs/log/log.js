@@ -26,7 +26,7 @@ import {
   generateFromFile, storeLocal, getLocalUrl, deleteLocal,
 } from '../../services/thumbs.js';
 import {
-  fetchDay, maybeRefresh, lastRefreshedAt, isAutoRefreshDue,
+  fetchDay, lastRefreshedAt,
 } from '../../services/refresh.js';
 import * as ops from '../../services/ops.js';
 import {
@@ -772,11 +772,3 @@ async function updateLastRefreshedLabel() {
   el.textContent = `Last refreshed ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// Triggered by app.js on foreground / online — opportunistic, throttled
-// refresh of the currently-viewed date. Step 10 will replace the call site
-// with refresh.maybeRefresh directly and drop this wrapper.
-export async function autoSync() {
-  if (!isAutoRefreshDue(s.viewedDate)) return;
-  try { await maybeRefresh(s.viewedDate); }
-  catch {}
-}

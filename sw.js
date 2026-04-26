@@ -16,7 +16,7 @@ const DEV_MODE = false;
 const SHELL = [
   './', './index.html', './app.js', './exif.js', './manifest.json',
   './services/settings.js', './services/github.js', './services/queue.js', './services/wiki.js',
-  './services/location.js', './services/timeline.js', './services/thumbs.js', './services/sync.js', './services/restore.js',
+  './services/location.js', './services/timeline.js', './services/thumbs.js', './services/restore.js',
   './services/ops.js', './services/refresh.js',
   './settings/settings-ui.js',
   './core/ui.js', './core/state.js', './core/router.js',
