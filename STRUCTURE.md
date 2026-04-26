@@ -8,20 +8,24 @@
 
 Three things surfaced during the user's smoke test of the deployed v35. None is a Phase 3b regression — they are pre-existing behaviour or full-phase tasks. Each gets its own scoped session, NOT folded into Phase 3b.
 
-### Issue 1 — Photo preview missing on the photo-add flow
+### Issue 1 — Photo preview missing on the photo-add flow — STILL OPEN at v40
 
-**Symptom:** Tap "Add photo" in the log tab → pick a file → no thumbnail appears in the photo-add form. The comment input becomes editable, but the preview area stays blank.
+**Symptom:** Tap "Add photo" in the log tab → pick a file → no thumbnail appears in the photo-add form. The comment input becomes editable, the log line writes correctly with photo name + GPS coordinates, but the preview area itself stays blank.
 
-**Where to look:** `pwa/phone/tabs/log/log.js#onPhotoSelected`. The handler sets:
-```js
-const prev = $('photo-preview');
-prev.src = URL.createObjectURL(file);
-prev.style.display = 'block';
-$('photo-pick-area').style.display = 'none';
-```
-Then `cancelPhotoForm` later does the inverse. The mismatch is likely one of: (a) `#photo-preview` element ID changed in `index.html`, (b) a CSS rule overrides `display:block`, (c) the file input's `change` event isn't firing on the user's browser. Open Firefox devtools, watch the element's computed style and `src` attribute when `change` fires.
+**v40 state.** Five hotfix rounds (v36–v40) failed to fix it; user paused further iteration to do this properly later. Diagnostics are still deployed in v40 — `pwa/phone/tabs/log/log.js#onPhotoSelected` writes status to `#photo-preview-status` from the `<img>`'s `onload`/`onerror` handlers. User reports the status reads `preview WxH` with real numbers — meaning `onload` fires, `naturalWidth × naturalHeight` are populated, the bytes decoded, and the `.hidden` class was removed. The image IS in the DOM with valid dimensions; visually the area is still blank.
 
-**Scope:** small isolated bug fix. Own session, `/effort high` is fine. Verify on PC Firefox AND on the actual phone Chrome (the only deployment target).
+That rules out: element ID drift (`#photo-preview` matches), CSS `!important` overrides (none exist), the `change` event not firing (comment becomes editable, log line writes), the SW intercepting `blob:` URLs (v36 patch bypasses non-http(s) protocols anyway), object-URL vs data-URL (v38 tried `FileReader.readAsDataURL`), `:not([src])` cascade ambiguity (v39 switched to a plain `.hidden` class toggle), and a flex-column + `aspect-ratio:4/3` layout collapse (v40 replaced with `width:100%; height:auto; max-height:50vh`).
+
+**Hotfix attempts:**
+- v36 (`sw.js`) — bypass SW for non-http(s) URLs. No effect.
+- v37 (`index.html`, `log.js`) — `display:none` via `:not([src])` selector. No effect.
+- v38 (`log.js`) — `FileReader.readAsDataURL` instead of `URL.createObjectURL`. No effect.
+- v39 (`index.html`, `log.js`) — visible `#photo-preview-status` div + `onload`/`onerror` diagnostics + plain `.hidden` class toggle. Confirmed onload fires with real dimensions.
+- v40 (`index.html`) — drop `aspect-ratio` for `width:100%; height:auto; max-height:50vh`. Status of fix unknown.
+
+**Next session.** Don't speculate further from static analysis. Either get a remote DevTools session against the actual phone (inspect the `<img>` element's computed style, layout box, and rendered pixels), or rip the `<img>` out of its current parent and try a different layout shell. The diagnostic infrastructure (status div + handlers) and the v40 layout change should both be removed once the real fix lands. Verify on PC Firefox AND on the actual phone Chrome (the only deployment target).
+
+**Scope:** still small bug fix territory, but only after a real DevTools observation — not another speculative push.
 
 ### Issue 2 — Cross-device log invisibility (Phase 4 territory)
 
