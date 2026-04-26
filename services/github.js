@@ -81,6 +81,20 @@ export async function getFile(path) {
   return { content: decodeBase64(json.content), sha: json.sha };
 }
 
+// Fetch a binary file (e.g. a thumbnail blob) via the Contents API.
+// GitHub returns base64 in the `content` field for files <= 1 MB. Our
+// thumbnails are ~200 KB so we stay comfortably under that.
+export async function getBinary(path, mime = 'application/octet-stream') {
+  const { token, repo } = auth();
+  const res = await fetch(url(repo, path), { headers: headers(token) });
+  if (!res.ok) throwForStatus(res, path);
+  const json = await res.json();
+  const bin = atob((json.content || '').replace(/\n/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: mime }), sha: json.sha };
+}
+
 export async function listDir(path) {
   const { token, repo } = auth();
   const res = await fetch(url(repo, path), { headers: headers(token) });

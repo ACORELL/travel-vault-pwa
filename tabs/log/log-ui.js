@@ -35,6 +35,7 @@ export async function renderLog() {
     const ec = AUTHOR_COLORS[entry.author] || { base: '#f5f5f5', tint: 'rgba(245,245,245,0.35)', badge: '#999' };
 
     const locTag = entry.gps ? '<span class="entry-loc">Location ✓</span>' : '';
+    const isOwnEditable = entry.author === s.author && (entry.type === 'note' || entry.type === 'photo');
 
     if (entry.type === 'checkin') {
       groupAuthor = entry.author;
@@ -48,9 +49,14 @@ export async function renderLog() {
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else {
-      li.className = 'log-entry';
+      li.className = 'log-entry' + (isOwnEditable ? ' editable' : '');
       if (groupAuthor) {
         li.style.background = AUTHOR_COLORS[groupAuthor]?.tint || '';
+      }
+      if (isOwnEditable) {
+        li.addEventListener('click', () => {
+          window.dispatchEvent(new CustomEvent('entry-edit-requested', { detail: { id: entry.id } }));
+        });
       }
 
       if (entry.type === 'photo') {

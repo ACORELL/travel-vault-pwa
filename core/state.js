@@ -21,6 +21,8 @@ export const s = {
   wikiPages:     [],
   pendingPhoto:  null,   // { file, ts }
   pendingDraft:  null,   // { type: 'note'|'photo', text?, file?, ts?, comment? }
+  editingId:     null,   // entry.id when an existing entry is being edited
+  editingType:   null,   // 'note' | 'photo' when editingId is set
   viewedDate:    TODAY,
   availableDays: [],
 };

@@ -6,7 +6,7 @@
 // After bumping: git commit, push, done. The SW activate handler cleans up
 // all old cache entries automatically.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = 'tv-phone-v44';
+const CACHE = 'tv-phone-v45';
 
 // DEV_MODE: set true to bypass the SW cache entirely while iterating locally.
 // Every request goes straight to the network — no manual cache-clear needed.
@@ -16,7 +16,7 @@ const DEV_MODE = false;
 const SHELL = [
   './', './index.html', './app.js', './exif.js', './manifest.json',
   './services/settings.js', './services/github.js', './services/queue.js', './services/wiki.js',
-  './services/location.js', './services/timeline.js', './services/thumbs.js', './services/sync.js',
+  './services/location.js', './services/timeline.js', './services/thumbs.js', './services/sync.js', './services/restore.js',
   './settings/settings-ui.js',
   './core/ui.js', './core/state.js', './core/router.js',
   './tabs/wiki/wiki.js', './tabs/wiki/wiki-ui.js', './tabs/wiki/today-strip.js',

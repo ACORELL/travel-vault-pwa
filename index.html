@@ -79,6 +79,10 @@
     .entry-comment { font-size: 13px; color: var(--muted); font-style: italic; }
     .entry-photo-meta { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; display: block; margin-top: 2px; word-break: break-all; }
     .entry-loc { display: inline-block; font-size: 11px; font-weight: 500; color: #166534; margin-top: 4px; letter-spacing: .02em; }
+    .log-entry.editable { cursor: pointer; }
+    .log-entry.editable:active { background: rgba(0,0,0,0.04); }
+    #photo-replace { padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px; background: none; font-family: inherit; font-size: 13px; cursor: pointer; align-self: flex-start; }
+    #photo-replace:active { background: var(--surface); }
 
     .add-bar-wrap { position: sticky; bottom: 0; background: #fff; border-top: 1px solid var(--border); padding: 10px 0 0; }
     .add-bar { display: flex; gap: 8px; }
@@ -238,6 +242,7 @@
     .settings-actions button { padding: 12px; font-size: 14px; font-family: inherit; border-radius: 8px; cursor: pointer; font-weight: 500; }
     #settings-save { background: #1a1a1a; color: #fff; border: none; }
     #settings-test { background: none; border: 1.5px solid var(--border); color: #1a1a1a; }
+    #settings-restore { background: none; border: 1.5px solid #166534; color: #166534; }
     #settings-clear { background: none; border: 1.5px solid #fde68a; color: #92400e; }
     #settings-reset-all { background: none; border: 1.5px solid #fecaca; color: #991b1b; }
     .settings-status { font-size: 13px; padding: 8px 10px; border-radius: 6px; display: none; }
@@ -364,6 +369,7 @@
   <div class="fsbody">
     <img id="photo-preview" class="photo-preview-img" alt="" hidden>
     <div id="photo-preview-meta" class="photo-preview-meta" hidden></div>
+    <button id="photo-replace" type="button" hidden>Replace photo</button>
     <textarea id="photo-comment" rows="3" placeholder="Comment (required)…" disabled></textarea>
     <p class="field-hint">A comment is required</p>
   </div>
@@ -428,6 +434,7 @@
     <div class="settings-actions">
       <button id="settings-save">Save</button>
       <button id="settings-test">Test connection</button>
+      <button id="settings-restore">Restore from repo</button>
       <button id="settings-clear">Clear PAT &amp; queue</button>
       <button id="settings-reset-all">Wipe all settings</button>
     </div>

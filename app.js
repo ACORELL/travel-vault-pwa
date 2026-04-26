@@ -12,7 +12,7 @@ import * as logTab from './tabs/log/log.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 44; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 45; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
 // Visible on every screen for at-a-glance "did the new build land?" debugging.

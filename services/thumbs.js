@@ -136,3 +136,16 @@ export async function markSynced(ref) {
     req.onerror   = () => reject(req.error);
   });
 }
+
+// Used after a thumb has been replaced (edit-photo flow): the local blob
+// is overwritten, but the previously-synced version still lives in the
+// data repo. Removing the sync-state entry surfaces the ref again in
+// unsyncedRefs so the next sync re-uploads it.
+export async function markUnsynced(ref) {
+  const store = await tx(STORE_SYNC, 'readwrite');
+  return new Promise((resolve, reject) => {
+    const req = store.delete(ref);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => reject(req.error);
+  });
+}

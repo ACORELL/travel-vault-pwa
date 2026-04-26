@@ -36,7 +36,7 @@ export async function checkConflicts() {}
 export function setupLogTab() {
   $('btn-checkin').addEventListener('click', checkIn);
   $('btn-add-note').addEventListener('click', openNoteForm);
-  $('note-cancel').addEventListener('click',  () => hide('note-form'));
+  $('note-cancel').addEventListener('click',  () => { hide('note-form'); exitEditMode(); });
   $('note-confirm').addEventListener('click', submitNote);
   $('note-text').addEventListener('input', () => {
     $('note-confirm').disabled = !$('note-text').value.trim();
@@ -63,6 +63,58 @@ export function setupLogTab() {
     $('btn-pending-checkin').disabled = false;
     $('btn-pending-checkin').textContent = '📍 Check in here';
   });
+
+  $('photo-replace').addEventListener('click', () => $('photo-input').click());
+  window.addEventListener('entry-edit-requested', e => editEntry(e.detail.id));
+  // Reload after a successful settings restore so the log tab shows what
+  // just landed in IDB.
+  window.addEventListener('timeline-restored', () => loadLog());
+}
+
+// ---- Edit ----
+async function editEntry(id) {
+  const entry = s.logEntries.find(e => e.id === id && e.author === s.author);
+  if (!entry) return;
+  s.editingId = entry.id;
+  s.editingType = entry.type;
+
+  if (entry.type === 'note') {
+    $('note-text').value = entry.content || '';
+    $('note-confirm').disabled = false;
+    $('note-confirm').textContent = 'Save';
+    show('note-form');
+    $('note-text').focus();
+    return;
+  }
+  if (entry.type === 'photo') {
+    s.pendingPhoto = {
+      file: null,
+      t: entry.t,
+      gps: entry.gps || null,
+      ref: entry.ref,
+      replaced: false,
+    };
+    $('photo-comment').value = entry.comment || '';
+    $('photo-comment').disabled = false;
+    $('photo-confirm').disabled = false;
+    $('photo-confirm').textContent = 'Save';
+    const prev = $('photo-preview');
+    if (prev._url) URL.revokeObjectURL(prev._url);
+    prev._url = null;
+    const url = await thumbs.getLocalUrl(entry.ref);
+    if (url) { prev.src = url; prev.hidden = false; }
+    const meta = $('photo-preview-meta');
+    const gpsLine = entry.gps ? `${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}` : 'no GPS';
+    meta.textContent = `${entry.ref} · ${gpsLine}`;
+    meta.hidden = false;
+    $('photo-replace').hidden = false;
+    show('photo-form');
+  }
+}
+
+function exitEditMode() {
+  s.editingId = null;
+  s.editingType = null;
 }
 
 async function checkIn() {
@@ -91,6 +143,7 @@ async function checkIn() {
 }
 
 function openNoteForm() {
+  exitEditMode();
   $('note-text').value = '';
   $('note-confirm').disabled = true;
   $('note-confirm').textContent = 'Add';
@@ -101,6 +154,19 @@ function openNoteForm() {
 async function submitNote() {
   const text = $('note-text').value.trim();
   if (!text) return;
+
+  // Edit mode: just update the existing entry's content. Skip proximity +
+  // GPS resampling — the user is correcting wording, not relocating.
+  if (s.editingId && s.editingType === 'note') {
+    const existing = s.logEntries.find(e => e.id === s.editingId && e.author === s.author);
+    if (!existing) { exitEditMode(); hide('note-form'); return; }
+    await timeline.appendLocal(s.viewedDate, { ...stripUiFields(existing), content: text });
+    hide('note-form');
+    $('note-text').value = '';
+    exitEditMode();
+    await loadLog();
+    return;
+  }
 
   const btn = $('note-confirm');
   btn.disabled = true;
@@ -132,12 +198,30 @@ async function submitNote() {
   await loadLog();
 }
 
+// `author` is added by getCombined for rendering; it isn't part of the
+// on-disk entry shape and must be stripped before write-back.
+function stripUiFields({ author, ...rest }) { return rest; }
+
 // D5: no preview. Tapping "+ Photo" opens the camera (capture="environment"
 // on #photo-input); selecting a photo brings up the comment form directly.
 async function onPhotoSelected(e) {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
+
+  // Replace flow inside the edit form: same ref, same gps, same id; just
+  // swap the file and refresh the preview. Don't open a new form, don't
+  // resample GPS.
+  if (s.editingId && s.editingType === 'photo' && s.pendingPhoto) {
+    s.pendingPhoto.file = file;
+    s.pendingPhoto.replaced = true;
+    const prev = $('photo-preview');
+    if (prev._url) URL.revokeObjectURL(prev._url);
+    prev._url = URL.createObjectURL(file);
+    prev.src = prev._url;
+    prev.hidden = false;
+    return;
+  }
 
   const t = nowLocalIso();
   s.pendingPhoto = { file, t };
@@ -162,6 +246,7 @@ async function onPhotoSelected(e) {
   $('photo-comment').disabled = false;
   $('photo-confirm').disabled = true;
   $('photo-confirm').textContent = 'Add';
+  $('photo-replace').hidden = true;
   show('photo-form');
 }
 
@@ -174,12 +259,32 @@ function cancelPhotoForm() {
   prev.removeAttribute('src');
   prev.hidden = true;
   $('photo-preview-meta').hidden = true;
+  $('photo-replace').hidden = true;
   s.pendingPhoto = null;
+  exitEditMode();
 }
 
 async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
   if (!comment || !s.pendingPhoto) return;
+
+  // Edit mode: same ref, same id. If the file was replaced, regenerate the
+  // thumb and mark the ref unsynced so the next sync re-uploads. If only
+  // the comment changed, we just update the timeline entry.
+  if (s.editingId && s.editingType === 'photo') {
+    const existing = s.logEntries.find(e => e.id === s.editingId && e.author === s.author);
+    if (existing) {
+      if (s.pendingPhoto.replaced && s.pendingPhoto.file) {
+        const blob = await thumbs.generateFromFile(s.pendingPhoto.file);
+        await thumbs.storeLocal(existing.ref, blob);
+        await thumbs.markUnsynced(existing.ref);
+      }
+      await timeline.appendLocal(s.viewedDate, { ...stripUiFields(existing), comment });
+    }
+    cancelPhotoForm();
+    await loadLog();
+    return;
+  }
 
   const { file, t, gps } = s.pendingPhoto;
   const btn = $('photo-confirm');

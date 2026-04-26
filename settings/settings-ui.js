@@ -6,6 +6,7 @@ import * as settings from '../services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO, WORKER_URL, AUTHOR } from '../services/settings.js';
 import { getFile, GitHubAuthError, GitHubNotFoundError } from '../services/github.js';
 import * as queue from '../services/queue.js';
+import { restoreFromRepo } from '../services/restore.js';
 
 const DEFAULT_WORKER_URL = 'https://travel-vault-worker.corell-ask.workers.dev';
 
@@ -89,6 +90,31 @@ async function resetAll() {
   setStatus('All settings wiped', 'ok');
 }
 
+async function restore() {
+  saveInputs();
+  if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO) || !settings.get(AUTHOR)) {
+    setStatus('PAT, repo, and author are required', 'error');
+    return;
+  }
+  if (!confirm('Restore your own timeline + thumbnails from the data repo? Existing local entries with the same id are overwritten.')) return;
+  setStatus('Restoring…', '');
+  try {
+    const result = await restoreFromRepo(p => {
+      if (p.phase === 'thumb' || p.phase === 'date-entries-done') {
+        setStatus(`Restoring… ${p.entries} entries, ${p.thumbs} thumbs`, '');
+      }
+    });
+    setStatus(`Restored ${result.entries} entries and ${result.thumbs} thumbs across ${result.dates} day(s)`, 'ok');
+    window.dispatchEvent(new CustomEvent('timeline-restored'));
+  } catch (e) {
+    if (e instanceof GitHubAuthError) {
+      setStatus('Auth failed — check PAT and repo', 'error');
+    } else {
+      setStatus(`Restore failed: ${e.message}`, 'error');
+    }
+  }
+}
+
 export function init() {
   $('header-settings-btn').addEventListener('click', openSettings);
   $('settings-close').addEventListener('click', () => { saveInputs(); closeSettings(); });
@@ -99,6 +125,7 @@ export function init() {
     window.dispatchEvent(new CustomEvent('try-flush'));
   });
   $('settings-test').addEventListener('click', testConnection);
+  $('settings-restore').addEventListener('click', restore);
   $('settings-clear').addEventListener('click', clearCredentials);
   $('settings-reset-all').addEventListener('click', resetAll);
 }
