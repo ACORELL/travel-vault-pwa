@@ -98,6 +98,9 @@ export function setupLogTab() {
       updateLastRefreshedLabel();
     }
   });
+  // Re-render when the ops queue changes so per-entry debug badges
+  // (synced / pending / thumb) reflect the latest queue state.
+  window.addEventListener('ops-changed', () => loadLog());
 }
 
 // ─── Capture (add) ────────────────────────────────────────────────────────────
