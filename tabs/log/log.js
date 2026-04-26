@@ -80,11 +80,13 @@ export function setupLogTab() {
 
   // Detail-view action triggers (parent + appendment edit/delete). detail.js
   // dispatches; we listen here so the cycle stays one-way (log.js → detail.js).
-  window.addEventListener('entry-edit-requested',       e => startEditEntry(e.detail.id));
-  window.addEventListener('entry-delete-requested',     e => deleteEntryRequested(e.detail.id));
-  window.addEventListener('checkin-delete-requested',   e => deleteCheckinGroupRequested(e.detail.id));
-  window.addEventListener('appendment-edit-requested',  e => startEditAppendment(e.detail.parentId, e.detail.appId));
-  window.addEventListener('appendment-delete-requested', e => deleteAppendmentRequested(e.detail.parentId, e.detail.appId));
+  window.addEventListener('entry-edit-requested',           e => startEditEntry(e.detail.id));
+  window.addEventListener('entry-delete-requested',         e => deleteEntryRequested(e.detail.id));
+  window.addEventListener('checkin-delete-requested',       e => deleteCheckinGroupRequested(e.detail.id));
+  window.addEventListener('appendment-edit-requested',      e => startEditAppendment(e.detail.parentId, e.detail.appId));
+  window.addEventListener('appendment-delete-requested',    e => deleteAppendmentRequested(e.detail.parentId, e.detail.appId));
+  window.addEventListener('appendment-add-comment-requested', e => startAddAppendmentComment(e.detail.parentId));
+  window.addEventListener('appendment-add-photo-requested',   e => startAddAppendmentPhoto(e.detail.parentId));
 
   // Re-render after restoreFromRepo finishes hydrating IDB.
   window.addEventListener('timeline-restored', () => loadLog());
@@ -165,6 +167,19 @@ async function submitNote() {
     const { parentId, appId } = c;
     closeNoteForm();
     await commitEditAppendment(date, parentId, appId, { content: text });
+  } else if (c.kind === 'append-note') {
+    const { parentId } = c;
+    const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const t   = nowLocalIso();
+    const cached = await getCached(date);
+    const id  = makeId(t, s.author, cached?.entries || []);
+    const appendment = {
+      id, author: s.author, t,
+      content: text,
+      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+    };
+    closeNoteForm();
+    await commitAddAppendment(date, parentId, appendment);
   }
 }
 
@@ -187,7 +202,14 @@ async function onPhotoSelected(e) {
   }
 
   const t = nowLocalIso();
-  s.composing = { kind: 'add-photo', file, t };
+  // append-photo: parentId was preset by startAddAppendmentPhoto; we layer
+  // file + t on top. add-photo (no preset): build from scratch.
+  if (s.composing?.kind === 'append-photo') {
+    s.composing.file = file;
+    s.composing.t = t;
+  } else {
+    s.composing = { kind: 'add-photo', file, t };
+  }
 
   const prev = $('photo-preview');
   if (prev._url) URL.revokeObjectURL(prev._url);
@@ -196,7 +218,7 @@ async function onPhotoSelected(e) {
   prev.hidden = false;
 
   const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
-  if (s.composing?.kind === 'add-photo') {
+  if (s.composing?.kind === 'add-photo' || s.composing?.kind === 'append-photo') {
     s.composing.gps = gps ? { lat: gps.lat, lon: gps.lon } : null;
   }
   const meta = $('photo-preview-meta');
@@ -260,10 +282,41 @@ async function submitPhoto() {
     const replacedFile = c.replacedFile || null;
     closePhotoForm();
     await commitEditAppendmentPhoto(date, parentId, appId, { comment }, replacedFile);
+  } else if (c.kind === 'append-photo') {
+    if (!c.file || !c.parentId) return;
+    const { file, t, gps, parentId } = c;
+    const hms  = t.slice(11, 19).replace(/:/g, '');
+    const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
+    const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    const cached = await getCached(date);
+    const id   = makeId(t, s.author, cached?.entries || []);
+    const appendment = {
+      id, author: s.author, t,
+      ref, comment,
+      gps: gps || null,
+    };
+    closePhotoForm();
+    await commitAddAppendmentPhoto(date, parentId, appendment, file);
   }
 }
 
 // ─── Edit (start) ─────────────────────────────────────────────────────────────
+
+function startAddAppendmentComment(parentId) {
+  s.composing = { kind: 'append-note', parentId };
+  $('note-text').value = '';
+  $('note-confirm').disabled = true;
+  $('note-confirm').textContent = 'Add';
+  show('note-form');
+  $('note-text').focus();
+}
+
+function startAddAppendmentPhoto(parentId) {
+  // Stage the parentId on composing; onPhotoSelected reads it after the
+  // file picker closes and lays the file/t/gps fields on top.
+  s.composing = { kind: 'append-photo', parentId };
+  $('photo-input').click();
+}
 
 function startEditEntry(entryId) {
   const entry = s.logEntries.find(e => e.id === entryId);
@@ -446,6 +499,55 @@ async function commitAddPhoto(date, entry, file) {
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
     await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+  }
+}
+
+async function commitAddAppendment(date, parentId, appendment) {
+  await applyOptimistic(date, xs => xs.map(e => {
+    if (e.id !== parentId) return e;
+    return {
+      ...e,
+      appendments: [...(e.appendments || []), appendment].sort(byT),
+    };
+  }));
+  try {
+    await addAppendment(date, parentId, appendment);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-appendment', date, args: { parentId, appendment } });
+  }
+}
+
+async function commitAddAppendmentPhoto(date, parentId, appendment, file) {
+  const blob = await generateFromFile(file);
+  await storeLocal(appendment.ref, blob);
+  await applyOptimistic(date, xs => xs.map(e => {
+    if (e.id !== parentId) return e;
+    return {
+      ...e,
+      appendments: [...(e.appendments || []), appendment].sort(byT),
+    };
+  }));
+
+  let thumbDirect = false;
+  try {
+    await putFile(`days/${date}/thumbs/${appendment.ref}`, blob,
+                  `Add thumbnail ${appendment.ref}`);
+    thumbDirect = true;
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'put-thumb', date, args: { ref: appendment.ref } });
+  }
+
+  if (!thumbDirect) {
+    await ops.enqueue({ kind: 'add-appendment', date, args: { parentId, appendment } });
+    return;
+  }
+  try {
+    await addAppendment(date, parentId, appendment);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-appendment', date, args: { parentId, appendment } });
   }
 }
 

@@ -58,6 +58,21 @@ export function setupDetailView() {
     }
   });
 
+  // Bottom action bar — + Comment / + Photo (Step 9). Both close the sheet
+  // and dispatch — log.js opens the form prefilled with the parentId.
+  $('entry-detail-add-comment').addEventListener('click', () => {
+    if (!s.viewingEntry) return;
+    const parentId = s.viewingEntry;
+    closeDetail();
+    window.dispatchEvent(new CustomEvent('appendment-add-comment-requested', { detail: { parentId } }));
+  });
+  $('entry-detail-add-photo').addEventListener('click', () => {
+    if (!s.viewingEntry) return;
+    const parentId = s.viewingEntry;
+    closeDetail();
+    window.dispatchEvent(new CustomEvent('appendment-add-photo-requested', { detail: { parentId } }));
+  });
+
   window.addEventListener('day-changed', e => {
     if (e.detail?.date !== s.viewedDate || !s.viewingEntry) return;
     const stillExists = s.logEntries.some(x => x.id === s.viewingEntry);
