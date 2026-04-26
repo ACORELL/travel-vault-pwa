@@ -110,6 +110,11 @@
     .day-nav-btn:disabled { color: var(--muted); border-color: var(--border); cursor: default; }
     #day-nav-label { font-size: 14px; font-weight: 600; }
 
+    .sync-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 10px; }
+    #btn-sync { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: none; font-family: inherit; font-size: 12px; cursor: pointer; color: #1a1a1a; }
+    #btn-sync:disabled { opacity: 0.5; cursor: default; }
+    #last-synced-label { font-size: 11px; color: var(--muted); }
+
     .log-entry.checkin { border-radius: 6px; margin-bottom: 4px; padding: 8px 10px; border-bottom: none; }
     .checkin-label { font-size: 13px; font-weight: 600; color: #166534; display: block; margin-bottom: 5px; }
     .checkin-coords { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; display: block; margin-top: 4px; }
@@ -205,6 +210,10 @@
         <button id="day-prev" class="day-nav-btn" disabled>‹</button>
         <span id="day-nav-label">Today</span>
         <button id="day-next" class="day-nav-btn" disabled>›</button>
+      </div>
+      <div class="sync-row">
+        <button id="btn-sync">Sync now</button>
+        <span id="last-synced-label">Never synced</span>
       </div>
       <ul id="log-list"></ul>
       <div class="add-bar-wrap">

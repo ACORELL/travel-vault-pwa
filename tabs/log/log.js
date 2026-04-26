@@ -8,6 +8,8 @@ import { s, TODAY } from '../../core/state.js';
 import * as geoloc from '../../services/location.js';
 import * as timeline from '../../services/timeline.js';
 import * as thumbs from '../../services/thumbs.js';
+import * as sync from '../../services/sync.js';
+import { GitHubAuthError } from '../../services/github.js';
 import * as logUi from './log-ui.js';
 
 const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
@@ -50,6 +52,9 @@ export function setupLogTab() {
 
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
+
+  $('btn-sync').addEventListener('click', runManualSync);
+  updateLastSyncedLabel();
 
   $('btn-pending-checkin').addEventListener('click', async () => {
     $('btn-pending-checkin').disabled = true;
@@ -254,6 +259,46 @@ async function checkProximity() {
   if (!currentGps) return 'ok';
   const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
   return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
+}
+
+async function runManualSync() {
+  const btn = $('btn-sync');
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  try {
+    await sync.syncToday();
+    btn.textContent = 'Sync now';
+    updateLastSyncedLabel();
+    await loadLog();
+  } catch (e) {
+    btn.textContent = 'Sync now';
+    if (e instanceof GitHubAuthError) {
+      $('last-synced-label').textContent = 'Auth error — check settings';
+    } else {
+      $('last-synced-label').textContent = 'Sync failed';
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function updateLastSyncedLabel() {
+  const ts = sync.lastSyncedAt();
+  const el = $('last-synced-label');
+  if (!ts) { el.textContent = 'Never synced'; return; }
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  el.textContent = `Last sync ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Triggered by app.js on foreground / online — quietly best-effort sync.
+export async function autoSync() {
+  if (!sync.isAutoSyncDue()) return;
+  try {
+    await sync.syncToday();
+    updateLastSyncedLabel();
+    await loadLog();
+  } catch {}
 }
 
 async function autoSubmitDraft(draft) {

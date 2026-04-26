@@ -181,7 +181,15 @@ window.addEventListener('online',  () => {
   if (settings.get(GITHUB_PAT) && settings.get(GITHUB_REPO)) {
     setSyncStatus('synced');
     tryFlush();
+    logTab.autoSync();
   }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!navigator.onLine) return;
+  if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO)) return;
+  logTab.autoSync();
 });
 
 function showVaultBanner(mode) {
