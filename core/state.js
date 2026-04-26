@@ -16,7 +16,6 @@ export const IS_WEEKEND_TODAY = (() => {
 
 export const s = {
   author:        localStorage.getItem('tv-author'),
-  vault:         null,
   syncStatus:    'offline',
   logEntries:    [],
   wikiPages:     [],
