@@ -6,7 +6,7 @@
 // After bumping: git commit, push, done. The SW activate handler cleans up
 // all old cache entries automatically.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = 'tv-phone-v35';
+const CACHE = 'tv-phone-v36';
 
 // DEV_MODE: set true to bypass the SW cache entirely while iterating locally.
 // Every request goes straight to the network — no manual cache-clear needed.
@@ -40,7 +40,9 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  if (new URL(e.request.url).origin !== self.location.origin) return;
+  const url = new URL(e.request.url);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return; // bypass blob:, data:
+  if (url.origin !== self.location.origin) return;
   if (DEV_MODE) return; // bypass cache — all requests go to network
   e.respondWith(caches.match(e.request).then(cached => cached || fetch(e.request)));
 });
