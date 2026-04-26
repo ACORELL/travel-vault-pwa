@@ -22,7 +22,7 @@ const SHELL = [
   './core/ui.js', './core/state.js', './core/router.js',
   './tabs/wiki/wiki.js', './tabs/wiki/wiki-ui.js', './tabs/wiki/today-strip.js',
   './tabs/capture/capture-ui.js',
-  './tabs/log/log.js', './tabs/log/log-ui.js',
+  './tabs/log/log.js', './tabs/log/log-ui.js', './tabs/log/detail.js',
 ];
 
 self.addEventListener('install', e => {

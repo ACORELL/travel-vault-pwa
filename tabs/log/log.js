@@ -26,6 +26,7 @@ import {
 import * as ops from '../../services/ops.js';
 import { putFile, GitHubAuthError } from '../../services/github.js';
 import * as logUi from './log-ui.js';
+import * as detail from './detail.js';
 
 // Local-implicit ISO datetime (no Z, no offset). The trip is one timezone;
 // the assembly PWA at home will canonicalise if it ever needs to.
@@ -69,6 +70,8 @@ export function setupLogTab() {
   const refreshBtn = $('btn-refresh');
   if (refreshBtn) refreshBtn.addEventListener('click', runManualRefresh);
   updateLastRefreshedLabel();
+
+  detail.setupDetailView();
 
   // Re-render after restoreFromRepo finishes hydrating IDB.
   window.addEventListener('timeline-restored', () => loadLog());

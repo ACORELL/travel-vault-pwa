@@ -77,6 +77,12 @@
     .entry-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; display: block; }
     .photo-icon { font-size: 20px; }
     .entry-comment { font-size: 13px; color: var(--muted); font-style: italic; }
+    .entry-photo-meta { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; display: block; margin-top: 2px; word-break: break-all; }
+    .entry-loc { display: inline-block; font-size: 11px; font-weight: 500; color: #166534; margin-top: 4px; letter-spacing: .02em; }
+    .log-entry.editable { cursor: pointer; }
+    .log-entry.editable:active { background: rgba(0,0,0,0.04); }
+    #photo-replace { padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px; background: none; font-family: inherit; font-size: 13px; cursor: pointer; align-self: flex-start; }
+    #photo-replace:active { background: var(--surface); }
 
     .add-bar-wrap { position: sticky; bottom: 0; background: #fff; border-top: 1px solid var(--border); padding: 10px 0 0; }
     .add-bar { display: flex; gap: 8px; }
@@ -102,9 +108,9 @@
     #day-nav-label { font-size: 14px; font-weight: 600; }
 
     .sync-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 10px; }
-    #btn-sync { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: none; font-family: inherit; font-size: 12px; cursor: pointer; color: #1a1a1a; }
-    #btn-sync:disabled { opacity: 0.5; cursor: default; }
-    #last-synced-label { font-size: 11px; color: var(--muted); }
+    #btn-refresh { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: none; font-family: inherit; font-size: 12px; cursor: pointer; color: #1a1a1a; }
+    #btn-refresh:disabled { opacity: 0.5; cursor: default; }
+    #last-refreshed-label { font-size: 11px; color: var(--muted); }
 
     .log-entry.checkin { border-radius: 6px; margin-bottom: 4px; padding: 8px 10px; border-bottom: none; }
     .checkin-label { font-size: 13px; font-weight: 600; color: #166534; display: block; margin-bottom: 5px; }
@@ -123,16 +129,110 @@
     .fshdr .confirm { color: #1a1a1a; font-weight: 600; }
     .fshdr .confirm:disabled { color: var(--muted); }
     .fsbody { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+    .photo-preview-img { width: 100%; max-height: 400px; height: auto; object-fit: contain; border-radius: 10px; background: var(--surface); display: block; }
+    .photo-preview-meta { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; word-break: break-all; line-height: 1.4; }
     textarea { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; resize: none; background: #fff; -webkit-appearance: none; }
     textarea:focus { outline: none; border-color: #1a1a1a; }
     .field-hint { font-size: 12px; color: var(--muted); }
 
+    /* ---- Entry detail view ---- */
+    #entry-detail .fshdr h3 { flex: 1; text-align: center; font-size: 14px; font-weight: 600; }
+    .entry-detail-card { padding: 14px; border-radius: 10px; margin-bottom: 12px; }
+    .entry-detail-photo { width: 100%; max-height: 50vh; height: auto; object-fit: contain; border-radius: 8px; background: var(--surface); display: block; }
+    .entry-detail-photo-placeholder { font-size: 60px; text-align: center; padding: 40px 0; background: var(--surface); border-radius: 8px; }
+    .entry-detail-comment, .entry-detail-content { margin-top: 10px; font-size: 15px; line-height: 1.5; }
+    .entry-detail-checkin { font-size: 16px; font-weight: 600; color: #166534; }
+    .entry-detail-loc { font-size: 11px; color: var(--muted); margin-top: 8px; font-style: italic; }
+    #entry-detail-actions { display: flex; gap: 8px; margin-bottom: 14px; }
+    #entry-detail-actions button { padding: 8px 16px; font-size: 13px; font-family: inherit; border: 1.5px solid var(--border); border-radius: 6px; background: none; cursor: pointer; }
+    #entry-detail-actions button:disabled { opacity: 0.4; cursor: default; }
+    .entry-detail-action-edit { color: #1a1a1a; }
+    .entry-detail-action-delete { color: #991b1b; border-color: #fecaca !important; }
+    .entry-detail-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0 12px; }
+    .entry-detail-no-apps { font-size: 13px; color: var(--muted); font-style: italic; margin: 4px 0; }
+
+    /* Appendments — used by both the log list and the detail view */
+    .entry-appendments { margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+    .appendment { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 6px; }
+    .appendment-time { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; }
+    .appendment-body { grid-column: 1 / -1; font-size: 14px; line-height: 1.5; padding-top: 4px; }
+    .appendment-content { font-size: 14px; }
+    .appendment-comment { font-size: 13px; margin-top: 6px; }
+    .appendment-photo { width: 100%; max-width: 280px; max-height: 200px; height: auto; object-fit: contain; border-radius: 6px; background: var(--surface); display: block; }
+    .appendment-photo-wrap .photo-icon { font-size: 24px; }
+    .appendment-actions { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+    .appendment-actions button { font-size: 11px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; font-family: inherit; }
+    .appendment-actions button:disabled { opacity: 0.4; cursor: default; }
+
+    /* Sticky bottom action bar inside the detail view */
+    .entry-detail-bottom { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); display: flex; gap: 8px; flex-shrink: 0; background: #fff; }
+    .entry-detail-bottom button { flex: 1; padding: 11px; border: 1.5px solid var(--border); border-radius: 8px; background: none; font-size: 14px; font-family: inherit; cursor: pointer; font-weight: 500; }
+    .entry-detail-bottom button:disabled { opacity: 0.4; cursor: default; }
+
     /* ---- Wiki tab ---- */
     .wiki-search { width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: var(--surface); margin-bottom: 16px; -webkit-appearance: none; }
     .wiki-search:focus { outline: none; border-color: #1a1a1a; background: #fff; }
-    .wiki-section { margin-bottom: 12px; }
-    .wiki-section h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; margin-bottom: 6px; }
-    .wiki-item { padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .wiki-cap-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+    .wiki-cap-btn { padding: 5px 12px; border: 1.5px solid var(--border); border-radius: 8px; background: none; font-size: 18px; font-weight: 400; color: var(--muted); cursor: pointer; font-family: inherit; line-height: 1; }
+    .wiki-cap-btn:active { background: var(--surface); }
+    .capture-status { font-size: 13px; margin-top: 4px; }
+
+    /* ---- Today strip ---- */
+    #today-strip:not(:empty) { margin-bottom: 14px; }
+    .today-strip-heading { font-size: 11px; font-variant: small-caps; font-weight: 500; color: var(--muted); letter-spacing: .08em; margin-bottom: 6px; }
+    .today-item { border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 4px; margin-bottom: 6px; overflow: hidden; }
+    .today-item-row { padding: 10px 12px; font-size: 13px; line-height: 1.4; cursor: pointer; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .today-item-row:active { background: var(--surface); }
+    .today-item-line { flex: 1; }
+    .today-item-arrow { font-size: 14px; color: var(--muted); flex-shrink: 0; margin-top: 1px; }
+    .today-fold { display: none; padding: 10px 12px; font-size: 13px; color: #333; border-top: 1px solid var(--border); }
+    .today-fold.open { display: block; }
+    .today-fold-row { margin-top: 6px; line-height: 1.5; }
+    .today-fold-row:first-child { margin-top: 0; }
+    .today-fold-row a { color: #1565c0; text-decoration: none; }
+    .today-fold-list { padding-left: 18px; list-style: decimal; margin-top: 2px; }
+    .today-fold-list li { margin-top: 3px; }
+    .today-source-label { font-size: 12px; color: var(--muted); font-weight: 500; display: block; margin-bottom: 4px; }
+    .today-source-content { background: var(--surface); border-radius: 6px; padding: 8px; font-size: 12px; font-family: 'Courier New', monospace; white-space: pre-wrap; overflow-x: auto; max-height: 200px; overflow-y: auto; }
+    .today-item-hotel    { border-left-color: #c8960a; background: rgba(255, 243, 220, 0.08); }
+    .today-item-transport { border-left-color: #4a8fc8; background: rgba(221, 238, 255, 0.08); }
+    .today-item-activity  { border-left-color: #3a9e50; background: rgba(228, 242, 228, 0.08); }
+    @keyframes tv-pulse-hotel     { 0%,100% { box-shadow: 0 2px 8px rgba(0,0,0,0.12); } 50% { box-shadow: 0 3px 14px rgba(212,136,10,0.28), 0 2px 6px rgba(0,0,0,0.10); } }
+    @keyframes tv-pulse-transport { 0%,100% { box-shadow: 0 2px 8px rgba(0,0,0,0.12); } 50% { box-shadow: 0 3px 14px rgba(42,127,204,0.28), 0 2px 6px rgba(0,0,0,0.10); } }
+    @keyframes tv-pulse-activity  { 0%,100% { box-shadow: 0 2px 8px rgba(0,0,0,0.12); } 50% { box-shadow: 0 3px 14px rgba(30,153,64,0.28),  0 2px 6px rgba(0,0,0,0.10); } }
+    .today-item-hotel.today-item-upcoming    { border-left-width: 6px; border-left-color: #d4880a; border-top: 2px solid #d4880a; animation: tv-pulse-hotel     3s ease-in-out infinite; }
+    .today-item-transport.today-item-upcoming { border-left-width: 6px; border-left-color: #2a7fcc; border-top: 2px solid #2a7fcc; animation: tv-pulse-transport 3s ease-in-out infinite; }
+    .today-item-activity.today-item-upcoming  { border-left-width: 6px; border-left-color: #1e9940; border-top: 2px solid #1e9940; animation: tv-pulse-activity  3s ease-in-out infinite; }
+    .today-item-past { opacity: 0.5; }
+    .today-item-past.today-item-hotel    { border-left-color: var(--border); background: transparent; }
+    .today-item-past.today-item-transport { border-left-color: var(--border); background: transparent; }
+    .today-item-past.today-item-activity  { border-left-color: var(--border); background: transparent; }
+    .today-item-past.today-item-expanded { opacity: 1; }
+    .today-item-hotel.today-item-past.today-item-expanded    { border-left-color: #c8960a; background: rgba(255,243,220,0.12); border-top: 2px solid #c8960a; }
+    .today-item-transport.today-item-past.today-item-expanded { border-left-color: #4a8fc8; background: rgba(221,238,255,0.12); border-top: 2px solid #4a8fc8; }
+    .today-item-activity.today-item-past.today-item-expanded  { border-left-color: #3a9e50; background: rgba(228,242,228,0.12); border-top: 2px solid #3a9e50; }
+    .today-item-countdown { font-size: 11px; font-weight: 600; flex-shrink: 0; white-space: nowrap; margin-top: 2px; color: var(--muted); }
+    .today-item-hotel.today-item-upcoming    .today-item-countdown { color: #d4880a; }
+    .today-item-transport.today-item-upcoming .today-item-countdown { color: #2a7fcc; }
+    .today-item-activity.today-item-upcoming  .today-item-countdown { color: #1e9940; }
+    .today-category-header { font-size: 10px; font-variant: small-caps; font-weight: 500; color: var(--muted); letter-spacing: .08em; margin: 10px 0 4px; }
+    .today-category-header:first-child { margin-top: 0; }
+    .today-fold-banner { font-weight: 700; font-size: 15px; text-align: center; padding: 4px 0 10px; color: #1a1a1a; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+    .today-tomorrow-item { padding: 8px 12px; font-size: 13px; line-height: 1.4; color: #555; }
+    .today-divider { border: none; border-top: 1px solid var(--border); margin: 8px 0 4px; }
+    .strip-row { display: flex; gap: 16px; }
+    .strip-col { flex: 1; min-width: 0; }
+    .strip-label { font-size: 11px; font-weight: 600; color: #555; display: block; margin-bottom: 2px; }
+    .strip-value { font-size: 13px; color: #1a1a1a; display: block; }
+    .fold-label { font-weight: 600; color: #1a1a1a; }
+    .wiki-accordion-section { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+    .wiki-accordion-header { width: 100%; padding: 12px 14px; font-size: 14px; font-weight: 600; background: none; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-family: inherit; text-align: left; color: #1a1a1a; }
+    .wiki-accordion-header:active { background: var(--surface); }
+    .wiki-accordion-arrow { font-size: 14px; color: var(--muted); transition: transform 0.15s ease; flex-shrink: 0; }
+    .wiki-accordion-header.open .wiki-accordion-arrow { transform: rotate(90deg); }
+    .wiki-accordion-body { display: none; border-top: 1px solid var(--border); }
+    .wiki-accordion-body.open { display: block; }
+    .wiki-item { padding: 11px 14px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
     .wiki-item:last-child { border-bottom: none; }
     .wiki-name { font-size: 15px; font-weight: 500; }
     .wiki-area { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -142,7 +242,62 @@
     #wiki-article { position: fixed; inset: 0; z-index: 50; background: #fff; overflow-y: auto; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top)); display: none; }
     #wiki-article.open { display: block; }
     #article-back { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 0 0 16px; font-family: inherit; }
+    #article-maps-link { padding: 8px 0 4px; font-size: 0.9em; }
+    #article-maps-link a { color: #1565c0; text-decoration: none; }
     #article-content { font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+
+    /* Hotel card */
+    .hotel-card-name { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+    .hotel-card-section { margin-bottom: 14px; }
+    .hotel-card-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 4px; }
+    .hotel-card-booking-ref { font-size: 28px; font-weight: 700; color: #1565c0; letter-spacing: .02em; }
+    .hotel-stay-row { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .hotel-stay-row:last-child { border-bottom: none; }
+    .hotel-stay-key { color: var(--muted); flex-shrink: 0; padding-right: 12px; }
+    .hotel-card-list { padding-left: 18px; font-size: 14px; line-height: 1.8; }
+    .hotel-card-notes { font-size: 14px; color: #555; line-height: 1.5; }
+    .hotel-card-links { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .hotel-card-link { font-size: 14px; color: #1565c0; text-decoration: none; font-weight: 500; }
+    .hotel-card-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+    .hotel-card-body { font-size: 13px; color: var(--muted); line-height: 1.7; white-space: pre-wrap; }
+
+    /* ---- Settings overlay ---- */
+    #settings-overlay { z-index: 110; align-items: stretch; justify-content: stretch; background: #fff; }
+    #settings-overlay .settings-card { background: #fff; width: 100%; height: 100%; padding: calc(env(safe-area-inset-top) + 16px) 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; max-width: 520px; margin: 0 auto; text-align: left; }
+    .settings-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .settings-hdr h2 { font-size: 18px; font-weight: 600; }
+    #settings-close { background: none; border: none; font-size: 22px; color: var(--muted); cursor: pointer; padding: 4px 8px; font-family: inherit; line-height: 1; }
+    .settings-field { display: flex; flex-direction: column; gap: 4px; }
+    .settings-field label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .settings-field input { padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 14px; font-family: inherit; background: #fff; -webkit-appearance: none; }
+    .settings-field input:focus { outline: none; border-color: #1a1a1a; }
+    .settings-field-hint { font-size: 11px; color: var(--muted); }
+    .settings-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .settings-actions button { padding: 12px; font-size: 14px; font-family: inherit; border-radius: 8px; cursor: pointer; font-weight: 500; }
+    #settings-save { background: #1a1a1a; color: #fff; border: none; }
+    #settings-test { background: none; border: 1.5px solid var(--border); color: #1a1a1a; }
+    #settings-restore { background: none; border: 1.5px solid #166534; color: #166534; }
+    #settings-clear { background: none; border: 1.5px solid #fde68a; color: #92400e; }
+    #settings-reset-all { background: none; border: 1.5px solid #fecaca; color: #991b1b; }
+    .settings-status { font-size: 13px; padding: 8px 10px; border-radius: 6px; display: none; }
+    .settings-status-ok    { background: #dcfce7; color: #166534; }
+    .settings-status-error { background: #fee2e2; color: #991b1b; }
+    #header-settings-btn { background: none; border: none; color: #fff; opacity: .7; padding: 4px 8px; margin-left: 4px; cursor: pointer; font-family: inherit; font-size: 16px; line-height: 1; }
+    #header-settings-btn:active { opacity: 1; }
+
+    /* ---- Version stamp (debug) ---- */
+    #app-version {
+      position: fixed;
+      right: 8px;
+      bottom: calc(var(--nav) + env(safe-area-inset-bottom) + 4px);
+      font-size: 10px;
+      font-family: 'Courier New', monospace;
+      color: var(--muted);
+      opacity: 0.5;
+      letter-spacing: .05em;
+      pointer-events: none;
+      z-index: 1;
+    }
 
     /* ---- Shared ---- */
     .empty-state { text-align: center; color: var(--muted); font-size: 14px; padding: 40px 0; }
@@ -171,6 +326,7 @@
     <div class="hdr-right">
       <span id="author-label"></span>
       <span class="sync-dot offline" id="sync-dot" title="offline"></span>
+      <button id="header-settings-btn" title="Settings" aria-label="Settings">⚙</button>
     </div>
   </header>
 
@@ -183,8 +339,8 @@
         <button id="day-next" class="day-nav-btn" disabled>›</button>
       </div>
       <div class="sync-row">
-        <button id="btn-sync">Sync now</button>
-        <span id="last-synced-label">Never synced</span>
+        <button id="btn-refresh">Refresh</button>
+        <span id="last-refreshed-label">Not refreshed yet</span>
       </div>
       <ul id="log-list"></ul>
       <div class="add-bar-wrap">
@@ -204,7 +360,11 @@
 
     <!-- Wiki tab -->
     <div id="tab-wiki" class="tab-panel">
-      <input id="wiki-search" class="wiki-search" type="text" placeholder="Search places…">
+      <div class="wiki-cap-row">
+        <button id="wiki-capture-btn" class="wiki-cap-btn" title="Quick raw capture">+</button>
+      </div>
+      <div id="today-strip"></div>
+      <input id="wiki-search" class="wiki-search" type="text" placeholder="Search...">
       <div id="wiki-list"></div>
     </div>
   </main>
@@ -241,18 +401,97 @@
     <button id="photo-confirm" class="confirm" disabled>Add</button>
   </div>
   <div class="fsbody">
+    <img id="photo-preview" class="photo-preview-img" alt="" hidden>
+    <div id="photo-preview-meta" class="photo-preview-meta" hidden></div>
+    <button id="photo-replace" type="button" hidden>Replace photo</button>
     <textarea id="photo-comment" rows="3" placeholder="Comment (required)…" disabled></textarea>
     <p class="field-hint">A comment is required</p>
+  </div>
+</div>
+
+<!-- Entry detail view -->
+<div id="entry-detail" class="fsform hidden">
+  <div class="fshdr">
+    <button id="entry-detail-close">Close</button>
+    <h3 id="entry-detail-title">Entry</h3>
+  </div>
+  <div class="fsbody">
+    <div id="entry-detail-parent"></div>
+    <div id="entry-detail-actions"></div>
+    <hr class="entry-detail-divider">
+    <div id="entry-detail-appendments"></div>
+  </div>
+  <div class="entry-detail-bottom">
+    <button id="entry-detail-add-comment" disabled>+ Comment</button>
+    <button id="entry-detail-add-photo" disabled>+ Photo</button>
+  </div>
+</div>
+
+<!-- Raw capture form -->
+<div id="raw-capture-form" class="fsform hidden">
+  <div class="fshdr">
+    <button id="capture-cancel">Cancel</button>
+    <h3>Raw Capture</h3>
+    <button id="capture-save" class="confirm">Save</button>
+  </div>
+  <div class="fsbody">
+    <textarea id="capture-text" rows="8" placeholder="Place name, URL, notes — anything…"></textarea>
+    <p id="capture-status" class="capture-status" style="display:none"></p>
   </div>
 </div>
 
 <!-- Wiki article -->
 <div id="wiki-article">
   <button id="article-back">← Back</button>
+  <div id="article-hotel-card" style="display:none"></div>
+  <div id="article-maps-link" hidden></div>
   <div id="article-content"></div>
 </div>
 
 <input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none">
+
+<div id="app-version" aria-hidden="true"></div>
+
+<!-- Settings overlay -->
+<div id="settings-overlay" class="overlay hidden">
+  <div class="settings-card">
+    <div class="settings-hdr">
+      <h2>Settings</h2>
+      <button id="settings-close" aria-label="Close">✕</button>
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-pat">GitHub PAT</label>
+      <input id="settings-pat" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      <span class="settings-field-hint">Fine-grained token, Contents read+write on the data repo only</span>
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-repo">Data repo</label>
+      <input id="settings-repo" type="text" autocomplete="off" spellcheck="false" placeholder="owner/repo">
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-worker">Worker URL</label>
+      <input id="settings-worker" type="url" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-author">Author</label>
+      <input id="settings-author" type="text" maxlength="1" autocomplete="off" spellcheck="false" placeholder="N or A">
+    </div>
+
+    <p id="settings-status" class="settings-status" style="display:none"></p>
+
+    <div class="settings-actions">
+      <button id="settings-save">Save</button>
+      <button id="settings-test">Test connection</button>
+      <button id="settings-restore">Restore from repo</button>
+      <button id="settings-clear">Clear PAT &amp; queue</button>
+      <button id="settings-reset-all">Wipe all settings</button>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="app.js"></script>
 </body>

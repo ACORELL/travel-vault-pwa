@@ -109,6 +109,11 @@ export async function renderLog() {
       li.appendChild(appsBox);
     }
 
+    // Tap-to-open the detail view. detail.js subscribes to this event.
+    li.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('entry-detail-open', { detail: { id: entry.id } }));
+    });
+
     list.appendChild(li);
   }
 }
