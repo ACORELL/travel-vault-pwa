@@ -15,7 +15,7 @@ import * as logTab from './tabs/log/log.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 37; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 38; // bump in lockstep with sw.js CACHE on every push
 const FSA_SUPPORTED = typeof window.showDirectoryPicker === 'function';
 
 // Stamp the version into the bottom-right of the app shell at module load.

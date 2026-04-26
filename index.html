@@ -86,6 +86,7 @@
     .entry-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; display: block; }
     .photo-icon { font-size: 20px; }
     .entry-comment { font-size: 13px; color: var(--muted); font-style: italic; }
+    .entry-photo-meta { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; display: block; margin-top: 2px; word-break: break-all; }
 
     .add-bar-wrap { position: sticky; bottom: 0; background: #fff; border-top: 1px solid var(--border); padding: 10px 0 0; }
     .add-bar { display: flex; gap: 8px; }
@@ -127,7 +128,7 @@
     .fshdr .confirm { color: #1a1a1a; font-weight: 600; }
     .fshdr .confirm:disabled { color: var(--muted); }
     .fsbody { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-    .photo-preview-img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; background: var(--surface); }
+    .photo-preview-img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; background: var(--surface); }
     .photo-preview-img:not([src]), .photo-preview-img[src=""] { display: none; }
     #photo-pick-area { width: 100%; aspect-ratio: 4/3; background: var(--surface); border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
     #photo-pick-area span { color: var(--muted); font-size: 14px; }

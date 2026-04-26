@@ -139,7 +139,9 @@ async function onPhotoSelected(e) {
   s.pendingPhoto = { file, ts: nowHHMMSS() };
 
   const prev = $('photo-preview');
-  prev.src = URL.createObjectURL(file);
+  const reader = new FileReader();
+  reader.onload = () => { prev.src = reader.result; };
+  reader.readAsDataURL(file);
   $('photo-pick-area').style.display = 'none';
   $('photo-comment').disabled = false;
   $('photo-comment').value = '';
@@ -151,7 +153,6 @@ async function onPhotoSelected(e) {
 function cancelPhotoForm() {
   hide('photo-form');
   const prev = $('photo-preview');
-  if (prev.src) URL.revokeObjectURL(prev.src);
   prev.removeAttribute('src');
   $('photo-pick-area').style.display = 'flex';
   $('photo-comment').value = '';

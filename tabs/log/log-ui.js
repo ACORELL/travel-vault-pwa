@@ -50,9 +50,12 @@ export async function renderLog() {
           const url = await vault.getPhotoUrl(s.vault, s.viewedDate, entry.photo);
           if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
         }
+        const nameEl = entry.photo ? `<span class="entry-photo-meta">${esc(entry.photo)}</span>` : '';
+        const gpsEl  = entry.gps   ? `<span class="entry-photo-meta">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>` : '';
         li.innerHTML = `${timeEl}<div class="entry-body">
           <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
           <p class="entry-comment">${esc(entry.comment)}</p>
+          ${nameEl}${gpsEl}
         </div>`;
       } else {
         li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>`;
