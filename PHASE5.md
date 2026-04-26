@@ -1,7 +1,12 @@
 # Phase 5 — Plan: shared-timeline + live writes + appendments + delete
 
-**Current state: Plan drafted, awaiting sign-off. No code changes yet.**
-**Next: User reviews decisions D1–D12, then `/effort high` execution session begins.**
+**Current state: Steps 0–12 shipped to inner repo (commits a6ac557 → Step 12).
+The shared-timeline + atomicEdit + ops queue + refresh + detail-view + edit /
+delete / append / cascade flows are all in place; pwa-structure.md reflects
+the new shape.**
+**Next: Step 13 — bump VERSION/CACHE to 46 and push from a fresh clone of
+acorell/travel-vault-pwa. Step 14 (PROGRESS log + REARCHITECTURE) is the
+post-deploy sign-off.**
 
 ---
 
