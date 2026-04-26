@@ -1,6 +1,55 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Phase 3b complete — all 11 steps shipped. `app.js` is bootstrap-only (235 lines, down from 1607). All 11 module targets in place.**
+**Current state: Phase 3b CLOSED. Shipped at SW cache `tv-phone-v35`. `app.js` 1607 → 235 lines, 11 modules in place. User smoke-tested core flows on PC and confirmed they still work.**
+
+---
+
+## Open follow-up issues (next session — NOT Phase 3b regressions)
+
+Three things surfaced during the user's smoke test of the deployed v35. None is a Phase 3b regression — they are pre-existing behaviour or full-phase tasks. Each gets its own scoped session, NOT folded into Phase 3b.
+
+### Issue 1 — Photo preview missing on the photo-add flow
+
+**Symptom:** Tap "Add photo" in the log tab → pick a file → no thumbnail appears in the photo-add form. The comment input becomes editable, but the preview area stays blank.
+
+**Where to look:** `pwa/phone/tabs/log/log.js#onPhotoSelected`. The handler sets:
+```js
+const prev = $('photo-preview');
+prev.src = URL.createObjectURL(file);
+prev.style.display = 'block';
+$('photo-pick-area').style.display = 'none';
+```
+Then `cancelPhotoForm` later does the inverse. The mismatch is likely one of: (a) `#photo-preview` element ID changed in `index.html`, (b) a CSS rule overrides `display:block`, (c) the file input's `change` event isn't firing on the user's browser. Open Firefox devtools, watch the element's computed style and `src` attribute when `change` fires.
+
+**Scope:** small isolated bug fix. Own session, `/effort high` is fine. Verify on PC Firefox AND on the actual phone Chrome (the only deployment target).
+
+### Issue 2 — Cross-device log invisibility (Phase 4 territory)
+
+**Symptom:** Phone, tablet, and PC each see only the log entries they themselves added. A check-in on the phone is invisible from the PC; a note added on the tablet doesn't appear on the phone. Photos similarly device-local.
+
+**Root cause:** today's log lives in `days/YYYY-MM-DD/log.md` *inside each device's local FSA-mounted vault folder*. The data path is FSA → file → Obsidian Sync → other devices. If Obsidian isn't running and foregrounded, no sync happens. Photos are even more brittle (binary, large, FSA-local).
+
+**This is exactly Phase 4 in `/vault/REARCHITECTURE.md`.** The fix:
+- Rewrite log writes through `services/github.js` + `services/queue.js` to commit `days/YYYY-MM-DD/timeline.json` to the private `acorell/travel-vault-data` repo (one append-only JSON file per day, not log.md)
+- Photo entries record only a timestamp-based reference (filename only) — binary stays in the camera roll, synced via Google Photos shared album (Phase 5 fetches them)
+- Cache the current day's timeline in IndexedDB for offline read
+- Delete `services/vault.js` and the FSA-related banners/overlay/listeners in `app.js`
+- Delete the `db.js` log-queue path (the GitHub queue replaces it)
+
+**Phase 3b moved the code structurally**; Phase 4 changes the data backend. Different concerns, different sessions. Phase 4 needs its own plan-phase per `coding-general.md` Section 3 (`/effort max` for the plan; `/effort high` for execution).
+
+**Plan-phase reading list for Phase 4:**
+- `/vault/REARCHITECTURE.md` (Phase 4 section — timeline.json schema is already specified)
+- `/vault/pwa/phone/tabs/log/log.js` (every FSA call needs a github.js equivalent: `appendLogLines` → append entry to timeline.json then PUT; `savePhoto` → drop binary entirely, write photo timeline entry; `readLogMd` → `getFile('days/YYYY-MM-DD/timeline.json')`; `listDayFolders` → `listDir('days')`; `detectConflicts` → retire, GitHub gives last-writer-wins by SHA)
+- `/vault/pwa/phone/tabs/log/log-ui.js` (renderLog needs to consume a timeline JSON array instead of parsed log.md entries — entry shape change)
+- `/vault/pwa/phone/services/queue.js` (already handles offline → online flush; reuse for log writes)
+- `/commons/standards/pwa-structure.md` "Phase Transition Notes" section (the planned deletion list when Phase 4 lands)
+
+### Issue 3 — Author selection only on first launch
+
+**Status: confirmed expected, no action.** `init()` in `app.js` only shows the `setup-overlay` when `localStorage['tv-author']` is missing. Per-browser, per-device. User confirmed this is fine.
+
+---
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
