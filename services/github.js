@@ -65,7 +65,10 @@ function decodeBase64(b64) {
 }
 
 function throwForStatus(res, path) {
-  if (res.status === 401) throw new GitHubAuthError(`401 on ${path}`);
+  // GitHub returns 403 for fine-grained PATs that lack permission on the
+  // resource (where 401 means "no/invalid token at all"). Both should
+  // route to the auth-error branch so the UI prompts a settings fix.
+  if (res.status === 401 || res.status === 403) throw new GitHubAuthError(`${res.status} on ${path}`);
   if (res.status === 404) throw new GitHubNotFoundError(`404 on ${path}`);
   if (res.status === 409 || res.status === 422) {
     throw new GitHubConflictError(`${res.status} on ${path}`);

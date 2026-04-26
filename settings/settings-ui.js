@@ -68,7 +68,7 @@ async function testConnection() {
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
       window.dispatchEvent(new CustomEvent('try-flush'));
     } else {
-      setStatus('Network error — check Worker URL or connectivity', 'error');
+      setStatus(`Connection error: ${e.message || e}`, 'error');
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
     }
   }
