@@ -139,9 +139,30 @@ async function onPhotoSelected(e) {
   s.pendingPhoto = { file, ts: nowHHMMSS() };
 
   const prev = $('photo-preview');
-  const reader = new FileReader();
-  reader.onload = () => { prev.src = reader.result; };
-  reader.readAsDataURL(file);
+  const status = $('photo-preview-status');
+  const sizeKB = (file.size / 1024).toFixed(0);
+  status.textContent = `picked ${file.name || '(unnamed)'} type=${file.type || '?'} ${sizeKB}KB — loading…`;
+
+  prev.classList.add('hidden');
+  prev.removeAttribute('src');
+  prev.onload  = () => {
+    prev.classList.remove('hidden');
+    status.textContent = `preview ${prev.naturalWidth}×${prev.naturalHeight}`;
+  };
+  prev.onerror = () => {
+    status.textContent = `preview FAILED to decode (src len=${(prev.src || '').length})`;
+  };
+
+  try {
+    prev.src = URL.createObjectURL(file);
+  } catch (err) {
+    status.textContent = `createObjectURL threw: ${err.message} — falling back to FileReader`;
+    const reader = new FileReader();
+    reader.onload  = () => { prev.src = reader.result; };
+    reader.onerror = () => { status.textContent = `FileReader error: ${reader.error?.message || 'unknown'}`; };
+    reader.readAsDataURL(file);
+  }
+
   $('photo-pick-area').style.display = 'none';
   $('photo-comment').disabled = false;
   $('photo-comment').value = '';
@@ -153,7 +174,12 @@ async function onPhotoSelected(e) {
 function cancelPhotoForm() {
   hide('photo-form');
   const prev = $('photo-preview');
+  if (prev.src && prev.src.startsWith('blob:')) URL.revokeObjectURL(prev.src);
   prev.removeAttribute('src');
+  prev.classList.add('hidden');
+  prev.onload = null;
+  prev.onerror = null;
+  $('photo-preview-status').textContent = '';
   $('photo-pick-area').style.display = 'flex';
   $('photo-comment').value = '';
   $('photo-comment').disabled = true;
