@@ -1,6 +1,11 @@
 // IndexedDB-backed offline queue for raw captures.
 // Items are creates only — no sha. Treats 422 as success (file already there).
 // Flush is sequential, insertion-order, stops on first failure.
+//
+// Owns the raw-queue store schema. (Previously declared in db.js, retired in
+// Phase 4.) Existing installs already have the store from db.js's old upgrade
+// handler at version 1; the if-not-exists check below is a no-op for them and
+// creates the store on fresh installs.
 
 import { putFile, GitHubAuthError, GitHubConflictError } from './github.js';
 
@@ -12,10 +17,12 @@ let _db = null;
 function open() {
   if (_db) return Promise.resolve(_db);
   return new Promise((resolve, reject) => {
-    // Same DB + version as db.js. The store was already declared in the
-    // original onupgradeneeded, so opening here without an upgrade handler
-    // simply attaches to the existing schema.
-    const req = indexedDB.open(DB_NAME);
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = ({ target: { result: db } }) => {
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { autoIncrement: true });
+      }
+    };
     req.onsuccess = e => { _db = e.target.result; resolve(_db); };
     req.onerror   = () => reject(req.error);
   });

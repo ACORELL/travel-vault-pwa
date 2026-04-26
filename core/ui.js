@@ -14,10 +14,6 @@ export function nowHHMMSS() { const d = new Date(); return `${pad(d.getHours())}
 export function esc(str)    { return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 export function fmtDate(d)  { const [y,m,day] = d.split('-').map(Number); return `${day} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]} ${y}`; }
 
-// Banner toggles — used by vault-banner and conflict-banner
-export function showBanner(id = 'vault-banner') { $(id).classList.add('show'); }
-export function hideBanner(id = 'vault-banner') { $(id).classList.remove('show'); }
-
 // Sync dot — single source of truth for s.syncStatus + the visual indicator
 export function setSyncStatus(status) {
   s.syncStatus = status;

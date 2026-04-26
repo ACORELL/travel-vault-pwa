@@ -2,7 +2,6 @@
 // Single coherent responsibility: turn s.wikiPages into the strip HTML.
 import { $, $$, esc } from '../../core/ui.js';
 import { s, TODAY, TOMORROW, IS_WEEKEND_TODAY } from '../../core/state.js';
-import * as vault from '../../vault.js';
 
 const TRANSPORT_EMOJI = { flight: '✈️', train: '🚆', bus: '🚌', ferry: '⛴️', other: '🎫' };
 
@@ -454,33 +453,8 @@ export function renderTodayStrip() {
       if (arrow) arrow.textContent = opening ? '∨' : '›';
       const item = row.closest('.today-item');
       if (item) item.classList.toggle('today-item-expanded', opening);
-      if (opening) loadTodaySourceFile(fold);
     });
   });
-}
-
-async function loadTodaySourceFile(foldEl) {
-  if (!s.vault) return;
-  const sourceRows = foldEl.querySelectorAll('.today-source-row');
-  for (const sourceRow of sourceRows) {
-    if (sourceRow.dataset.loaded) continue;
-    const sourcePath = sourceRow.dataset.source;
-    if (!sourcePath) continue;
-    const label = sourceRow.querySelector('.today-source-label');
-    const contentEl = sourceRow.querySelector('.today-source-content');
-    try {
-      const text = await vault.readSourceFile(s.vault, sourcePath);
-      if (text !== null) {
-        contentEl.textContent = text;
-        contentEl.style.display = '';
-      } else {
-        label.textContent = 'Original capture (unavailable)';
-      }
-    } catch {
-      label.textContent = 'Original capture (unavailable)';
-    }
-    sourceRow.dataset.loaded = '1';
-  }
 }
 
 // ---- Test fixture ----

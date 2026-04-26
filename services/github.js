@@ -33,12 +33,27 @@ function headers(token) {
   };
 }
 
-// UTF-8-safe base64. btoa() only handles Latin-1, so we route bytes through
-// TextEncoder/Decoder for content that may contain emoji or non-ASCII text.
-function encodeBase64(str) {
-  const bytes = new TextEncoder().encode(str);
+// UTF-8-safe base64 for arbitrary content. btoa() only handles Latin-1, so we
+// route bytes through TextEncoder for strings (handles emoji, accents) and
+// arrayBuffer() for Blobs / typed arrays (handles thumbnail binaries).
+async function encodeContent(content) {
+  let bytes;
+  if (typeof content === 'string') {
+    bytes = new TextEncoder().encode(content);
+  } else if (content instanceof Blob) {
+    bytes = new Uint8Array(await content.arrayBuffer());
+  } else if (content instanceof Uint8Array) {
+    bytes = content;
+  } else if (content instanceof ArrayBuffer) {
+    bytes = new Uint8Array(content);
+  } else {
+    throw new Error('putFile: unsupported content type');
+  }
   let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
   return btoa(bin);
 }
 
@@ -76,7 +91,7 @@ export async function listDir(path) {
 }
 
 async function putOnce(repo, token, path, content, message, sha) {
-  const body = { message, content: encodeBase64(content) };
+  const body = { message, content: await encodeContent(content) };
   if (sha) body.sha = sha;
   const res = await fetch(url(repo, path), {
     method: 'PUT',

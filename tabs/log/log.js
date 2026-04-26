@@ -1,41 +1,36 @@
-// Log tab — handlers, FSA queue drain, log parsing, day navigation, proximity check.
-// Phase 4 will rewrite the I/O paths against github.js + queue.js and delete vault.js.
-import { $, show, hide, nowHHMM, nowHHMMSS, setSyncStatus, showBanner } from '../../core/ui.js';
+// Log tab — capture handlers, day navigation, proximity check.
+// Phase 4: writes go to the local timeline via services/timeline.js; thumbs
+// generated and stored via services/thumbs.js. Sync to GitHub is deferred
+// (services/sync.js, wired in step 6). vault.js + db.js are no longer used
+// from this tab and are deleted entirely in step 8.
+import { $, show, hide, nowHHMMSS } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
-import { enqueueLogEntry, getLogQueue, clearLogKeys } from '../../db.js';
-import * as vault from '../../vault.js';
 import * as geoloc from '../../services/location.js';
+import * as timeline from '../../services/timeline.js';
+import * as thumbs from '../../services/thumbs.js';
+import * as sync from '../../services/sync.js';
+import { GitHubAuthError } from '../../services/github.js';
 import * as logUi from './log-ui.js';
 
 const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
 
-// ---- Queue flush (FSA path — drains the IndexedDB log queue to the vault folder) ----
-export async function syncQueue() {
-  const { items: logItems, keys: logKeys } = await getLogQueue();
-  if (!logItems.length) return;
-
-  setSyncStatus('syncing');
-  try {
-    const byDate = {};
-    for (let i = 0; i < logItems.length; i++) {
-      const item = logItems[i];
-      if (!byDate[item.date]) byDate[item.date] = { lines: [], keys: [], photos: [] };
-      byDate[item.date].lines.push(item.line);
-      byDate[item.date].keys.push(logKeys[i]);
-      if (item.photoFile && item.photoName) byDate[item.date].photos.push(item);
-    }
-    for (const [date, { lines, keys, photos }] of Object.entries(byDate)) {
-      await vault.appendLogLines(s.vault, date, lines);
-      for (const p of photos) await vault.savePhoto(s.vault, date, p.photoFile, p.photoName);
-      await clearLogKeys(keys);
-    }
-    setSyncStatus('synced');
-  } catch (e) {
-    console.error('Sync failed:', e);
-    setSyncStatus('offline');
-    showBanner();
-  }
+// Local-implicit ISO datetime (no Z, no offset). The trip is one timezone;
+// the assembly PWA at home will canonicalise if it ever needs to.
+function nowLocalIso() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+         `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+
+function makeId() {
+  return `${nowHHMMSS().replace(/:/g, '')}_${s.author}`;
+}
+
+// No-op stubs — app.js still calls these until step 7 removes the FSA-flow
+// branches. They are removed alongside activateVault in that step.
+export async function syncQueue() {}
+export async function checkConflicts() {}
 
 // ---- Log tab setup ----
 export function setupLogTab() {
@@ -49,7 +44,6 @@ export function setupLogTab() {
 
   $('btn-add-photo').addEventListener('click', () => $('photo-input').click());
   $('photo-input').addEventListener('change', onPhotoSelected);
-  $('photo-pick-area').addEventListener('click', () => $('photo-input').click());
   $('photo-cancel').addEventListener('click',  cancelPhotoForm);
   $('photo-confirm').addEventListener('click', submitPhoto);
   $('photo-comment').addEventListener('input', () => {
@@ -59,12 +53,13 @@ export function setupLogTab() {
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
 
+  $('btn-sync').addEventListener('click', runManualSync);
+  updateLastSyncedLabel();
+
   $('btn-pending-checkin').addEventListener('click', async () => {
     $('btn-pending-checkin').disabled = true;
     $('btn-pending-checkin').textContent = 'Getting GPS…';
     await checkIn();
-    // checkIn() handles draft auto-submit and restores btn-pending-checkin state
-    // via hidePendingDraft(); resetting its text is harmless but good practice
     $('btn-pending-checkin').disabled = false;
     $('btn-pending-checkin').textContent = '📍 Check in here';
   });
@@ -75,16 +70,17 @@ async function checkIn() {
   btn.disabled = true;
   btn.textContent = 'Getting GPS…';
 
-  const time = nowHHMM();
   const gps = await geoloc.sample({ timeout: 10000, maximumAge: 0 });
+  await timeline.appendLocal(TODAY, {
+    id: makeId(),
+    type: 'checkin',
+    t: nowLocalIso(),
+    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+  });
 
-  const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
-  await writeLogLine(`${time} | ${s.author} | 📍${gpsPart}`);
-
-  // If a draft was pending proximity check, auto-submit it now under this new check-in
   const draft = s.pendingDraft;
   if (draft) {
-    logUi.hidePendingDraft();   // clears s.pendingDraft, restores add-bar
+    logUi.hidePendingDraft();
     await autoSubmitDraft(draft);
   }
 
@@ -110,11 +106,9 @@ async function submitNote() {
   btn.disabled = true;
   btn.textContent = 'Checking…';
 
-  const { status: proximity } = await checkProximity();
-
+  const proximity = await checkProximity();
   btn.textContent = 'Add';
 
-  // If the user cancelled the form while GPS was resolving, discard silently
   if ($('note-form').classList.contains('hidden')) return;
 
   if (proximity === 'out-of-range') {
@@ -127,45 +121,26 @@ async function submitNote() {
 
   hide('note-form');
   $('note-text').value = '';
-  await writeLogLine(`${nowHHMM()} | ${s.author} | ${text}`);
+  await timeline.appendLocal(TODAY, {
+    id: makeId(),
+    type: 'note',
+    t: nowLocalIso(),
+    content: text,
+  });
   await loadLog();
 }
 
+// D5: no preview. Tapping "+ Photo" opens the camera (capture="environment"
+// on #photo-input); selecting a photo brings up the comment form directly.
 async function onPhotoSelected(e) {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
 
-  s.pendingPhoto = { file, ts: nowHHMMSS() };
+  s.pendingPhoto = { file, t: nowLocalIso() };
 
-  const prev = $('photo-preview');
-  const status = $('photo-preview-status');
-  const sizeKB = (file.size / 1024).toFixed(0);
-  status.textContent = `picked ${file.name || '(unnamed)'} type=${file.type || '?'} ${sizeKB}KB — loading…`;
-
-  prev.classList.add('hidden');
-  prev.removeAttribute('src');
-  prev.onload  = () => {
-    prev.classList.remove('hidden');
-    status.textContent = `preview ${prev.naturalWidth}×${prev.naturalHeight}`;
-  };
-  prev.onerror = () => {
-    status.textContent = `preview FAILED to decode (src len=${(prev.src || '').length})`;
-  };
-
-  try {
-    prev.src = URL.createObjectURL(file);
-  } catch (err) {
-    status.textContent = `createObjectURL threw: ${err.message} — falling back to FileReader`;
-    const reader = new FileReader();
-    reader.onload  = () => { prev.src = reader.result; };
-    reader.onerror = () => { status.textContent = `FileReader error: ${reader.error?.message || 'unknown'}`; };
-    reader.readAsDataURL(file);
-  }
-
-  $('photo-pick-area').style.display = 'none';
-  $('photo-comment').disabled = false;
   $('photo-comment').value = '';
+  $('photo-comment').disabled = false;
   $('photo-confirm').disabled = true;
   $('photo-confirm').textContent = 'Add';
   show('photo-form');
@@ -173,14 +148,6 @@ async function onPhotoSelected(e) {
 
 function cancelPhotoForm() {
   hide('photo-form');
-  const prev = $('photo-preview');
-  if (prev.src && prev.src.startsWith('blob:')) URL.revokeObjectURL(prev.src);
-  prev.removeAttribute('src');
-  prev.classList.add('hidden');
-  prev.onload = null;
-  prev.onerror = null;
-  $('photo-preview-status').textContent = '';
-  $('photo-pick-area').style.display = 'flex';
   $('photo-comment').value = '';
   $('photo-comment').disabled = true;
   s.pendingPhoto = null;
@@ -190,17 +157,14 @@ async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
   if (!comment || !s.pendingPhoto) return;
 
-  const { file, ts } = s.pendingPhoto;  // capture before any awaits
-
+  const { file, t } = s.pendingPhoto;
   const btn = $('photo-confirm');
   btn.disabled = true;
   btn.textContent = 'Checking…';
 
-  const { status: proximity, gps } = await checkProximity();
-
+  const proximity = await checkProximity();
   btn.textContent = 'Add';
 
-  // If the user cancelled the form while GPS was resolving, discard silently
   if ($('photo-form').classList.contains('hidden')) {
     s.pendingPhoto = null;
     return;
@@ -209,118 +173,54 @@ async function submitPhoto() {
   if (proximity === 'out-of-range') {
     s.pendingPhoto = null;
     cancelPhotoForm();
-    s.pendingDraft = { type: 'photo', file, ts, comment, gps };
+    s.pendingDraft = { type: 'photo', file, t, comment };
     logUi.showPendingDraft(`📷 "${comment}"`);
     return;
   }
 
   s.pendingPhoto = null;
   cancelPhotoForm();
-  await finishPhotoWrite(file, ts, comment, gps);
+  await finishPhotoWrite(file, t, comment);
   await loadLog();
 }
 
-async function finishPhotoWrite(file, ts, comment, gps) {
-  const hms  = ts.replace(/:/g, '-');
-  const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase();
-  const base = `${hms}_${s.author}`;
-  const name = await resolvePhotoName(base, ext);
-  const time = ts.slice(0, 5);
-  const gpsPart = gps ? ` | ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
-  const line = `${time} | ${s.author} | 📷 ${name}${gpsPart} | "${comment}"`;
+async function finishPhotoWrite(file, t, comment) {
+  // ref = YYYY-MM-DD_HHMMSS_<author>.<ext> — date-prefixed so unsyncedRefs(date)
+  // can filter by prefix; matches PHASE4.md §4 example.
+  const hms = t.slice(11, 19).replace(/:/g, '');
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const ref = `${TODAY}_${hms}_${s.author}.${ext}`;
+  const id  = `${hms}_${s.author}`;
 
-  if (s.vault) {
-    try {
-      await vault.savePhoto(s.vault, TODAY, file, name);
-      await vault.appendLogLines(s.vault, TODAY, [line]);
-    } catch {
-      await enqueueLogEntry({ date: TODAY, line, photoFile: file, photoName: name });
-      setSyncStatus('offline');
-      showBanner();
-    }
-  } else {
-    await enqueueLogEntry({ date: TODAY, line, photoFile: file, photoName: name });
-  }
-}
-
-async function resolvePhotoName(base, ext) {
-  if (!s.vault) return `${base}.${ext}`;
-  let name = `${base}.${ext}`, n = 2;
-  while (await vault.photoExists(s.vault, TODAY, name)) { name = `${base}_${n++}.${ext}`; }
-  return name;
-}
-
-async function writeLogLine(line) {
-  if (s.vault) {
-    try { await vault.appendLogLines(s.vault, TODAY, [line]); setSyncStatus('synced'); return; }
-    catch { setSyncStatus('offline'); showBanner(); }
-  }
-  await enqueueLogEntry({ date: TODAY, line });
+  const gps  = await geoloc.sample({ timeout: 3000, maximumAge: 60000 });
+  const blob = await thumbs.generateFromFile(file);
+  await thumbs.storeLocal(ref, blob);
+  await timeline.appendLocal(TODAY, {
+    id,
+    type: 'photo',
+    t,
+    ref,
+    comment,
+    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+  });
 }
 
 export async function loadLog() {
-  s.logEntries = [];
-
-  if (s.vault) {
-    try {
-      const text = await vault.readLogMd(s.vault, s.viewedDate);
-      if (text) s.logEntries = parseLogMd(text);
-    } catch {}
-  }
-
-  const { items } = await getLogQueue();
-  for (const item of items) {
-    if (item.date === s.viewedDate) {
-      const parsed = parseLogLine(item.line);
-      if (parsed) s.logEntries.push(parsed);
-    }
-  }
-  s.logEntries.sort((a, b) => a.time.localeCompare(b.time));
+  // getCombined returns own (from local IDB) ∪ other-author (fetched + cached
+  // from the data repo), each entry tagged with `author`. Renders sorted by t.
+  s.logEntries = await timeline.getCombined(s.viewedDate);
   logUi.updateDayNavUI();
   logUi.updateActionBarState();
-  logUi.renderLog();
-}
-
-function parseLogMd(text) {
-  let skip = 0;
-  return text.split('\n').filter(line => {
-    if (line === '---') { if (skip < 2) { skip++; return false; } }
-    return skip >= 2 && line.trim();
-  }).map(parseLogLine).filter(Boolean);
-}
-
-function parseLogLine(line) {
-  const parts = line.split(' | ');
-  if (parts.length < 3) return null;
-  const [time, author, ...rest] = parts;
-  const body = rest.join(' | ');
-  if (body.startsWith('📍')) {
-    const gpsMatch = body.match(/📍\s*\|\s*([-\d.]+),([-\d.]+)/);
-    const gps = gpsMatch ? { lat: parseFloat(gpsMatch[1]), lon: parseFloat(gpsMatch[2]) } : null;
-    return { time: time.trim(), author: author.trim(), type: 'checkin', gps };
-  }
-  if (body.startsWith('📷')) {
-    // Backward compatible: GPS chunk is optional. 📷 name [| lat,lon] | "comment"
-    const m = body.match(/📷\s*(\S+)(?:\s*\|\s*([-\d.]+),([-\d.]+))?\s*\|\s*"?(.+?)"?\s*$/);
-    if (m) {
-      const gps = m[2] && m[3] ? { lat: parseFloat(m[2]), lon: parseFloat(m[3]) } : null;
-      return { time: time.trim(), author: author.trim(), type: 'photo', photo: m[1], gps, comment: m[4] };
-    }
-    return { time: time.trim(), author: author.trim(), type: 'photo', photo: '', gps: null, comment: '' };
-  }
-  return { time: time.trim(), author: author.trim(), type: 'text', text: body };
+  await logUi.renderLog();
 }
 
 // ---- Day navigation ----
-
 export async function loadAvailableDays() {
-  if (!s.vault) {
+  try {
+    s.availableDays = await timeline.listAvailableDates();
+  } catch {
     s.availableDays = [TODAY];
-    return;
   }
-  const days = await vault.listDayFolders(s.vault);
-  if (!days.includes(TODAY)) days.push(TODAY);
-  s.availableDays = days.sort();
 }
 
 async function navigateDay(dir) {
@@ -333,18 +233,7 @@ async function navigateDay(dir) {
   await loadLog();
 }
 
-export async function checkConflicts() {
-  if (!s.vault) return;
-  const found = await vault.detectConflicts(s.vault, TODAY);
-  if (found.length) {
-    $('conflict-msg').textContent =
-      `Sync conflict in log.md — resolve in Obsidian (${found.length} file${found.length > 1 ? 's' : ''})`;
-    showBanner('conflict-banner');
-  }
-}
-
 // ---- Proximity enforcement ----
-
 function haversineMetres(lat1, lon1, lat2, lon2) {
   const R    = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -363,26 +252,64 @@ function getLastCheckinGps() {
   return null;
 }
 
-function sampleGpsForProximity() {
-  return geoloc.sample({ timeout: 5000, maximumAge: 60000 });
-}
-
-// Returns { status, gps }. status is 'ok' or 'out-of-range'. gps is the current
-// sample (or null if unavailable) — callers attach it to photo entries.
 async function checkProximity() {
-  const currentGps = await sampleGpsForProximity();
   const checkinGps = getLastCheckinGps();
-  if (!checkinGps || !currentGps) return { status: 'ok', gps: currentGps };
+  if (!checkinGps) return 'ok';
+  const currentGps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  if (!currentGps) return 'ok';
   const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
-  return { status: dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range', gps: currentGps };
+  return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
 }
 
-// Writes a pending draft entry to the log without calling loadLog().
-// Called from checkIn() after the new check-in line is already written.
+async function runManualSync() {
+  const btn = $('btn-sync');
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  try {
+    await sync.syncToday();
+    btn.textContent = 'Sync now';
+    updateLastSyncedLabel();
+    await loadLog();
+  } catch (e) {
+    btn.textContent = 'Sync now';
+    if (e instanceof GitHubAuthError) {
+      $('last-synced-label').textContent = 'Auth error — check settings';
+    } else {
+      $('last-synced-label').textContent = 'Sync failed';
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function updateLastSyncedLabel() {
+  const ts = sync.lastSyncedAt();
+  const el = $('last-synced-label');
+  if (!ts) { el.textContent = 'Never synced'; return; }
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  el.textContent = `Last sync ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Triggered by app.js on foreground / online — quietly best-effort sync.
+export async function autoSync() {
+  if (!sync.isAutoSyncDue()) return;
+  try {
+    await sync.syncToday();
+    updateLastSyncedLabel();
+    await loadLog();
+  } catch {}
+}
+
 async function autoSubmitDraft(draft) {
   if (draft.type === 'note') {
-    await writeLogLine(`${nowHHMM()} | ${s.author} | ${draft.text}`);
+    await timeline.appendLocal(TODAY, {
+      id: makeId(),
+      type: 'note',
+      t: nowLocalIso(),
+      content: draft.text,
+    });
   } else if (draft.type === 'photo') {
-    await finishPhotoWrite(draft.file, draft.ts, draft.comment, draft.gps);
+    await finishPhotoWrite(draft.file, draft.t, draft.comment);
   }
 }

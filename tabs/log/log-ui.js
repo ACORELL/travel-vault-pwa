@@ -1,13 +1,22 @@
 // Log tab — rendering, day-nav UI state, pending-draft toggles, and the
 // inline OSM check-in map.
+//
+// Phase 4: own photos render via thumbs.getLocalUrl from local IDB. Other-
+// author photo entries (added by step 5's getCombined) render as text
+// placeholders since their thumbnails live in the data repo and aren't
+// fetched mid-day.
 import { $, esc, fmtDate } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
-import * as vault from '../../vault.js';
+import * as thumbs from '../../services/thumbs.js';
 
 const AUTHOR_COLORS = {
   N: { base: '#f9e4ec', tint: 'rgba(249,228,236,0.35)', badge: '#c2185b' },
   A: { base: '#e4eef9', tint: 'rgba(228,238,249,0.35)', badge: '#1565c0' },
 };
+
+function entryHHMM(entry) {
+  return (entry.t || '').slice(11, 16);
+}
 
 export async function renderLog() {
   const list = $('log-list');
@@ -22,14 +31,13 @@ export async function renderLog() {
 
   for (const entry of s.logEntries) {
     const li = document.createElement('li');
-    const timeEl = `<span class="entry-time">${entry.time}</span>`;
+    const timeEl = `<span class="entry-time">${entryHHMM(entry)}</span>`;
     const ec = AUTHOR_COLORS[entry.author] || { base: '#f5f5f5', tint: 'rgba(245,245,245,0.35)', badge: '#999' };
 
     if (entry.type === 'checkin') {
       groupAuthor = entry.author;
       li.className = 'log-entry checkin';
       li.style.background = ec.base;
-      // Check-in: badge far left, then timestamp, then content
       const badgeHtml = `<span class="author-badge" style="background:${ec.badge};color:#fff">${entry.author}</span>`;
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}<span class="checkin-coords">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>`
@@ -38,27 +46,26 @@ export async function renderLog() {
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else {
-      // Notes and photos: no badge — author is communicated by group color
       li.className = 'log-entry';
       if (groupAuthor) {
         li.style.background = AUTHOR_COLORS[groupAuthor]?.tint || '';
       }
 
       if (entry.type === 'photo') {
+        const isOwn = entry.author === s.author;
         let thumb = '';
-        if (s.vault && entry.photo) {
-          const url = await vault.getPhotoUrl(s.vault, s.viewedDate, entry.photo);
+        if (isOwn && entry.ref) {
+          const url = await thumbs.getLocalUrl(entry.ref);
           if (url) thumb = `<img class="entry-thumb" src="${url}" alt="">`;
         }
-        const nameEl = entry.photo ? `<span class="entry-photo-meta">${esc(entry.photo)}</span>` : '';
-        const gpsEl  = entry.gps   ? `<span class="entry-photo-meta">${entry.gps.lat.toFixed(5)}, ${entry.gps.lon.toFixed(5)}</span>` : '';
+        if (!thumb) thumb = '<span class="photo-icon">📷</span>';
         li.innerHTML = `${timeEl}<div class="entry-body">
-          <div class="entry-photo-wrap">${thumb || '<span class="photo-icon">📷</span>'}</div>
-          <p class="entry-comment">${esc(entry.comment)}</p>
-          ${nameEl}${gpsEl}
+          <div class="entry-photo-wrap">${thumb}</div>
+          <p class="entry-comment">${esc(entry.comment || '')}</p>
         </div>`;
       } else {
-        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.text)}</div>`;
+        // type === 'note'
+        li.innerHTML = `${timeEl}<div class="entry-body">${esc(entry.content || '')}</div>`;
       }
     }
     list.appendChild(li);
@@ -107,8 +114,8 @@ export function showPendingDraft(previewText) {
 export function hidePendingDraft() {
   s.pendingDraft = null;
   $('pending-draft').style.display = 'none';
-  $('add-bar').style.display = '';       // reverts to flex via .add-bar CSS
-  updateActionBarState();                // re-evaluates hint and button states
+  $('add-bar').style.display = '';
+  updateActionBarState();
 }
 
 function checkinMapHtml(lat, lon) {
