@@ -1,6 +1,6 @@
 # Phase 3b — `app.js` Structural Extraction Plan
 
-**Current state: Completed through Step 4 — `tabs/wiki/wiki-ui.js` extracted (list + article + hotel card)**
+**Current state: Completed through Step 5 — `tabs/wiki/today-strip.js` extracted (~570 lines, all strip + test fixture)**
 
 This document is the contract for Phase 3b: pure structural extraction of
 `pwa/phone/app.js` into the layout defined in `pwa-structure.md`. Zero
@@ -327,7 +327,7 @@ on every push that ships extraction commits to GitHub Pages.
 - **Step 2** — `core/state.js` + `setSyncStatus` migration ✅
 - **Step 3** — `services/location.js` ✅ (+ Step 3 fix: `geoloc` rename)
 - **Step 4** — `tabs/wiki/wiki-ui.js` ✅ (capture listeners + dev test button parked in `wireWikiTabExternals` for Steps 5–6)
-- **Step 5** — `tabs/wiki/today-strip.js`
+- **Step 5** — `tabs/wiki/today-strip.js` ✅ (dev test button now uses `todayStrip.renderTestStrip`; capture listeners still in `wireWikiTabExternals` for Step 6)
 - **Step 6** — `tabs/capture/capture-ui.js`
 - **Step 7** — `tabs/wiki/wiki.js`
 - **Step 8** — `tabs/log/log-ui.js`
