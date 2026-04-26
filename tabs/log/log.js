@@ -1,18 +1,31 @@
-// Log tab — capture handlers, day navigation, proximity check.
-// Phase 4: writes go to the local timeline via services/timeline.js; thumbs
-// generated and stored via services/thumbs.js. Sync to GitHub is deferred
-// (services/sync.js, wired in step 6). vault.js + db.js are no longer used
-// from this tab and are deleted entirely in step 8.
-import { $, show, hide, nowHHMMSS } from '../../core/ui.js';
+// Log tab — capture handlers, day navigation, refresh button (Phase 5).
+//
+// Writes go straight to atomicEdit (services/timeline.js): fetch sha → run
+// mutator → PUT with sha. On a network failure the optimistic local cache
+// update is treated as authoritative and the op is parked in services/ops.js
+// for a later flush. Reads are cache-first via timeline.getCached, falling
+// back to refresh.fetchDay on cache miss.
+//
+// Steps 7-9 add detail view, edit/delete, and append wired into the same
+// surface; step 6 ships only check-in / note / photo capture + read +
+// the manual Refresh button.
+
+import { $, show, hide } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
 import * as geoloc from '../../services/location.js';
-import * as timeline from '../../services/timeline.js';
-import * as thumbs from '../../services/thumbs.js';
-import * as sync from '../../services/sync.js';
-import { GitHubAuthError } from '../../services/github.js';
+import {
+  addEntry, getCached, putCached,
+  listAvailableDates, makeId,
+} from '../../services/timeline.js';
+import {
+  generateFromFile, storeLocal,
+} from '../../services/thumbs.js';
+import {
+  fetchDay, maybeRefresh, lastRefreshedAt, isAutoRefreshDue,
+} from '../../services/refresh.js';
+import * as ops from '../../services/ops.js';
+import { putFile, GitHubAuthError } from '../../services/github.js';
 import * as logUi from './log-ui.js';
-
-const CHECKIN_PROXIMITY_THRESHOLD_M = 400;
 
 // Local-implicit ISO datetime (no Z, no offset). The trip is one timezone;
 // the assembly PWA at home will canonicalise if it ever needs to.
@@ -23,20 +36,16 @@ function nowLocalIso() {
          `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function makeId() {
-  return `${nowHHMMSS().replace(/:/g, '')}_${s.author}`;
+function byT(a, b) {
+  return (a.t || '').localeCompare(b.t || '');
 }
 
-// No-op stubs — app.js still calls these until step 7 removes the FSA-flow
-// branches. They are removed alongside activateVault in that step.
-export async function syncQueue() {}
-export async function checkConflicts() {}
+// ─── Setup ────────────────────────────────────────────────────────────────────
 
-// ---- Log tab setup ----
 export function setupLogTab() {
-  $('btn-checkin').addEventListener('click', checkIn);
+  $('btn-checkin').addEventListener('click', addCheckin);
   $('btn-add-note').addEventListener('click', openNoteForm);
-  $('note-cancel').addEventListener('click',  () => hide('note-form'));
+  $('note-cancel').addEventListener('click',  closeNoteForm);
   $('note-confirm').addEventListener('click', submitNote);
   $('note-text').addEventListener('input', () => {
     $('note-confirm').disabled = !$('note-text').value.trim();
@@ -44,53 +53,59 @@ export function setupLogTab() {
 
   $('btn-add-photo').addEventListener('click', () => $('photo-input').click());
   $('photo-input').addEventListener('change', onPhotoSelected);
-  $('photo-cancel').addEventListener('click',  cancelPhotoForm);
+  $('photo-cancel').addEventListener('click',  closePhotoForm);
   $('photo-confirm').addEventListener('click', submitPhoto);
   $('photo-comment').addEventListener('input', () => {
     $('photo-confirm').disabled = !$('photo-comment').value.trim();
   });
+  $('photo-replace').addEventListener('click', () => $('photo-input').click());
 
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
 
-  $('btn-sync').addEventListener('click', runManualSync);
-  updateLastSyncedLabel();
+  // The Refresh button + label use Phase-5 IDs (#btn-refresh /
+  // #last-refreshed-label). Step 7's index.html pass renames the existing
+  // #btn-sync / #last-synced-label markup to match.
+  const refreshBtn = $('btn-refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', runManualRefresh);
+  updateLastRefreshedLabel();
 
-  $('btn-pending-checkin').addEventListener('click', async () => {
-    $('btn-pending-checkin').disabled = true;
-    $('btn-pending-checkin').textContent = 'Getting GPS…';
-    await checkIn();
-    $('btn-pending-checkin').disabled = false;
-    $('btn-pending-checkin').textContent = '📍 Check in here';
+  // Re-render after restoreFromRepo finishes hydrating IDB.
+  window.addEventListener('timeline-restored', () => loadLog());
+  // Re-render whenever the cache for the viewed date changes — fires on
+  // atomicEdit's tail (own writes) and on refresh.fetchDay (other devices).
+  window.addEventListener('day-changed', e => {
+    if (e.detail?.date === s.viewedDate) {
+      loadLog();
+      updateLastRefreshedLabel();
+    }
   });
 }
 
-async function checkIn() {
+// ─── Capture ──────────────────────────────────────────────────────────────────
+
+async function addCheckin() {
   const btn = $('btn-checkin');
   btn.disabled = true;
   btn.textContent = 'Getting GPS…';
-
-  const gps = await geoloc.sample({ timeout: 10000, maximumAge: 0 });
-  await timeline.appendLocal(TODAY, {
-    id: makeId(),
-    type: 'checkin',
-    t: nowLocalIso(),
-    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
-  });
-
-  const draft = s.pendingDraft;
-  if (draft) {
-    logUi.hidePendingDraft();
-    await autoSubmitDraft(draft);
+  try {
+    const gps = await geoloc.sample({ timeout: 10000, maximumAge: 0 });
+    const t   = nowLocalIso();
+    const cached = await getCached(s.viewedDate);
+    const id  = makeId(t, s.author, cached?.entries || []);
+    const entry = {
+      id, type: 'checkin', author: s.author, t,
+      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+    };
+    await commitAdd(s.viewedDate, entry);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📍 Check in';
   }
-
-  await loadLog();
-
-  btn.disabled = false;
-  btn.textContent = '📍 Check in';
 }
 
 function openNoteForm() {
+  s.composing = { kind: 'add-note' };
   $('note-text').value = '';
   $('note-confirm').disabled = true;
   $('note-confirm').textContent = 'Add';
@@ -98,129 +113,185 @@ function openNoteForm() {
   $('note-text').focus();
 }
 
+function closeNoteForm() {
+  hide('note-form');
+  $('note-text').value = '';
+  s.composing = null;
+}
+
 async function submitNote() {
   const text = $('note-text').value.trim();
   if (!text) return;
+  if (s.composing?.kind !== 'add-note') return;
 
   const btn = $('note-confirm');
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  btn.textContent = 'Adding…';
 
-  const proximity = await checkProximity();
-  btn.textContent = 'Add';
-
-  if ($('note-form').classList.contains('hidden')) return;
-
-  if (proximity === 'out-of-range') {
-    hide('note-form');
-    $('note-text').value = '';
-    s.pendingDraft = { type: 'note', text };
-    logUi.showPendingDraft(text);
-    return;
-  }
-
-  hide('note-form');
-  $('note-text').value = '';
-  await timeline.appendLocal(TODAY, {
-    id: makeId(),
-    type: 'note',
-    t: nowLocalIso(),
+  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  const t   = nowLocalIso();
+  const cached = await getCached(s.viewedDate);
+  const id  = makeId(t, s.author, cached?.entries || []);
+  const entry = {
+    id, type: 'note', author: s.author, t,
     content: text,
-  });
-  await loadLog();
+    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+  };
+
+  closeNoteForm();
+  await commitAdd(s.viewedDate, entry);
 }
 
-// D5: no preview. Tapping "+ Photo" opens the camera (capture="environment"
-// on #photo-input); selecting a photo brings up the comment form directly.
 async function onPhotoSelected(e) {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
 
-  s.pendingPhoto = { file, t: nowLocalIso() };
+  const t = nowLocalIso();
+  s.composing = { kind: 'add-photo', file, t };
+
+  const prev = $('photo-preview');
+  if (prev._url) URL.revokeObjectURL(prev._url);
+  prev._url = URL.createObjectURL(file);
+  prev.src = prev._url;
+  prev.hidden = false;
+
+  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  if (s.composing?.kind === 'add-photo') {
+    s.composing.gps = gps ? { lat: gps.lat, lon: gps.lon } : null;
+  }
+  const meta = $('photo-preview-meta');
+  const gpsLine = gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : 'GPS unavailable';
+  meta.textContent = `${file.name || '(unnamed)'} · ${gpsLine}`;
+  meta.hidden = false;
 
   $('photo-comment').value = '';
   $('photo-comment').disabled = false;
   $('photo-confirm').disabled = true;
   $('photo-confirm').textContent = 'Add';
+  $('photo-replace').hidden = true;
   show('photo-form');
 }
 
-function cancelPhotoForm() {
+function closePhotoForm() {
   hide('photo-form');
   $('photo-comment').value = '';
   $('photo-comment').disabled = true;
-  s.pendingPhoto = null;
+  const prev = $('photo-preview');
+  if (prev._url) { URL.revokeObjectURL(prev._url); prev._url = null; }
+  prev.removeAttribute('src');
+  prev.hidden = true;
+  $('photo-preview-meta').hidden = true;
+  $('photo-replace').hidden = true;
+  s.composing = null;
 }
 
 async function submitPhoto() {
   const comment = $('photo-comment').value.trim();
-  if (!comment || !s.pendingPhoto) return;
+  if (!comment) return;
+  if (s.composing?.kind !== 'add-photo' || !s.composing.file) return;
 
-  const { file, t } = s.pendingPhoto;
+  const { file, t, gps } = s.composing;
   const btn = $('photo-confirm');
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  btn.textContent = 'Adding…';
 
-  const proximity = await checkProximity();
-  btn.textContent = 'Add';
+  const date = s.viewedDate;
+  const hms  = t.slice(11, 19).replace(/:/g, '');
+  const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
+  const ref  = `${date}_${hms}_${s.author}.${ext}`;
+  const cached = await getCached(date);
+  const id   = makeId(t, s.author, cached?.entries || []);
+  const entry = {
+    id, type: 'photo', author: s.author, t,
+    ref, comment,
+    gps: gps || null,
+  };
 
-  if ($('photo-form').classList.contains('hidden')) {
-    s.pendingPhoto = null;
-    return;
-  }
-
-  if (proximity === 'out-of-range') {
-    s.pendingPhoto = null;
-    cancelPhotoForm();
-    s.pendingDraft = { type: 'photo', file, t, comment };
-    logUi.showPendingDraft(`📷 "${comment}"`);
-    return;
-  }
-
-  s.pendingPhoto = null;
-  cancelPhotoForm();
-  await finishPhotoWrite(file, t, comment);
-  await loadLog();
+  closePhotoForm();
+  await commitAddPhoto(date, entry, file);
 }
 
-async function finishPhotoWrite(file, t, comment) {
-  // ref = YYYY-MM-DD_HHMMSS_<author>.<ext> — date-prefixed so unsyncedRefs(date)
-  // can filter by prefix; matches PHASE4.md §4 example.
-  const hms = t.slice(11, 19).replace(/:/g, '');
-  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-  const ref = `${TODAY}_${hms}_${s.author}.${ext}`;
-  const id  = `${hms}_${s.author}`;
+// ─── Commit helpers ───────────────────────────────────────────────────────────
 
-  const gps  = await geoloc.sample({ timeout: 3000, maximumAge: 60000 });
-  const blob = await thumbs.generateFromFile(file);
-  await thumbs.storeLocal(ref, blob);
-  await timeline.appendLocal(TODAY, {
-    id,
-    type: 'photo',
-    t,
-    ref,
-    comment,
-    gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
-  });
+// Optimistically update the local cache so the UI reflects the new entry
+// immediately. atomicEdit's tail will overwrite the cache with the canonical
+// shape (including any entries the other device added) on success; on
+// network failure, this optimistic state survives until the queued op drains.
+async function applyOptimistic(date, mutator) {
+  const cached = await getCached(date);
+  const next   = mutator(cached?.entries || []);
+  // Reuse the existing sha — atomicEdit fetches sha fresh anyway, so a stale
+  // sha in cache doesn't break writes. The 'day-changed' emit re-renders.
+  await putCached(date, next, cached?.sha);
 }
+
+async function commitAdd(date, entry) {
+  await applyOptimistic(date, xs => [...xs, entry].sort(byT));
+  try {
+    await addEntry(date, entry);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+  }
+}
+
+async function commitAddPhoto(date, entry, file) {
+  const blob = await generateFromFile(file);
+  await storeLocal(entry.ref, blob);
+  await applyOptimistic(date, xs => [...xs, entry].sort(byT));
+
+  // Thumb first so the timeline.json never points at a missing file. If the
+  // thumb upload fails (non-auth), queue both ops in order — entry can't
+  // ship before its thumb does.
+  let thumbDirect = false;
+  try {
+    await putFile(`days/${date}/thumbs/${entry.ref}`, blob,
+                  `Add thumbnail ${entry.ref}`);
+    thumbDirect = true;
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'put-thumb', date, args: { ref: entry.ref } });
+  }
+
+  if (!thumbDirect) {
+    await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+    return;
+  }
+  try {
+    await addEntry(date, entry);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'add-entry', date, args: { entry } });
+  }
+}
+
+// ─── Read path ────────────────────────────────────────────────────────────────
 
 export async function loadLog() {
-  // getCombined returns own (from local IDB) ∪ other-author (fetched + cached
-  // from the data repo), each entry tagged with `author`. Renders sorted by t.
-  s.logEntries = await timeline.getCombined(s.viewedDate);
+  let entries;
+  const cached = await getCached(s.viewedDate);
+  if (cached) {
+    entries = cached.entries;
+  } else {
+    try {
+      entries = await fetchDay(s.viewedDate);
+    } catch (e) {
+      if (e instanceof GitHubAuthError) throw e;
+      entries = [];
+    }
+  }
+  s.logEntries = entries;
   logUi.updateDayNavUI();
   logUi.updateActionBarState();
   await logUi.renderLog();
 }
 
-// ---- Day navigation ----
+// ─── Day navigation ───────────────────────────────────────────────────────────
+
 export async function loadAvailableDays() {
-  try {
-    s.availableDays = await timeline.listAvailableDates();
-  } catch {
-    s.availableDays = [TODAY];
-  }
+  try { s.availableDays = await listAvailableDates(); }
+  catch { s.availableDays = [TODAY]; }
 }
 
 async function navigateDay(dir) {
@@ -231,85 +302,49 @@ async function navigateDay(dir) {
   if (newIdx < 0 || newIdx >= s.availableDays.length) return;
   s.viewedDate = s.availableDays[newIdx];
   await loadLog();
+  // Background refresh for the just-navigated date so cross-device updates
+  // surface without requiring a manual tap on Refresh.
+  fetchDay(s.viewedDate).catch(() => {});
 }
 
-// ---- Proximity enforcement ----
-function haversineMetres(lat1, lon1, lat2, lon2) {
-  const R    = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a    = Math.sin(dLat / 2) ** 2
-             + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
-             * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// ─── Refresh ──────────────────────────────────────────────────────────────────
 
-function getLastCheckinGps() {
-  for (let i = s.logEntries.length - 1; i >= 0; i--) {
-    const e = s.logEntries[i];
-    if (e.type === 'checkin' && e.gps) return e.gps;
-  }
-  return null;
-}
-
-async function checkProximity() {
-  const checkinGps = getLastCheckinGps();
-  if (!checkinGps) return 'ok';
-  const currentGps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
-  if (!currentGps) return 'ok';
-  const dist = haversineMetres(checkinGps.lat, checkinGps.lon, currentGps.lat, currentGps.lon);
-  return dist <= CHECKIN_PROXIMITY_THRESHOLD_M ? 'ok' : 'out-of-range';
-}
-
-async function runManualSync() {
-  const btn = $('btn-sync');
+async function runManualRefresh() {
+  const btn = $('btn-refresh');
+  if (!btn) return;
   btn.disabled = true;
-  btn.textContent = 'Syncing…';
+  btn.textContent = 'Refreshing…';
   try {
-    await sync.syncToday();
-    btn.textContent = 'Sync now';
-    updateLastSyncedLabel();
-    await loadLog();
+    await fetchDay(s.viewedDate, { force: true });
+    btn.textContent = 'Refresh';
   } catch (e) {
-    btn.textContent = 'Sync now';
-    if (e instanceof GitHubAuthError) {
-      $('last-synced-label').textContent = 'Auth error — check settings';
-    } else {
-      $('last-synced-label').textContent = 'Sync failed';
+    btn.textContent = 'Refresh';
+    const label = $('last-refreshed-label');
+    if (label) {
+      label.textContent = e instanceof GitHubAuthError
+        ? 'Auth error — check settings'
+        : 'Refresh failed';
     }
   } finally {
     btn.disabled = false;
   }
 }
 
-function updateLastSyncedLabel() {
-  const ts = sync.lastSyncedAt();
-  const el = $('last-synced-label');
-  if (!ts) { el.textContent = 'Never synced'; return; }
+async function updateLastRefreshedLabel() {
+  const el = $('last-refreshed-label');
+  if (!el) return;
+  const ts = await lastRefreshedAt(s.viewedDate);
+  if (!ts) { el.textContent = 'Not refreshed yet'; return; }
   const d = new Date(ts);
   const pad = n => String(n).padStart(2, '0');
-  el.textContent = `Last sync ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  el.textContent = `Last refreshed ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// Triggered by app.js on foreground / online — quietly best-effort sync.
+// Triggered by app.js on foreground / online — opportunistic, throttled
+// refresh of the currently-viewed date. Step 10 will replace the call site
+// with refresh.maybeRefresh directly and drop this wrapper.
 export async function autoSync() {
-  if (!sync.isAutoSyncDue()) return;
-  try {
-    await sync.syncToday();
-    updateLastSyncedLabel();
-    await loadLog();
-  } catch {}
-}
-
-async function autoSubmitDraft(draft) {
-  if (draft.type === 'note') {
-    await timeline.appendLocal(TODAY, {
-      id: makeId(),
-      type: 'note',
-      t: nowLocalIso(),
-      content: draft.text,
-    });
-  } else if (draft.type === 'photo') {
-    await finishPhotoWrite(draft.file, draft.t, draft.comment);
-  }
+  if (!isAutoRefreshDue(s.viewedDate)) return;
+  try { await maybeRefresh(s.viewedDate); }
+  catch {}
 }

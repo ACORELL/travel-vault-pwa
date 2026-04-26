@@ -12,7 +12,7 @@
 // the latest known state.
 
 import {
-  putFileExact, getFile,
+  putFileExact, getFile, listDir,
   GitHubAuthError, GitHubNotFoundError, GitHubConflictError,
 } from './github.js';
 
@@ -233,6 +233,25 @@ export function deleteMany(date, idsToRemove, refSink = []) {
     }
     return xs.filter(e => !ids.has(e.id));
   });
+}
+
+// ─── Day index ────────────────────────────────────────────────────────────────
+// Today is always included even when the data repo has no folder for it yet,
+// so the day-nav shows it as a target before the first capture lands.
+
+export async function listAvailableDates() {
+  const today = new Date().toISOString().slice(0, 10);
+  let remote = [];
+  try {
+    const items = await listDir('days');
+    remote = items
+      .filter(i => i.type === 'dir' && /^\d{4}-\d{2}-\d{2}$/.test(i.name))
+      .map(i => i.name);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    remote = [];
+  }
+  return Array.from(new Set([today, ...remote])).sort().reverse();
 }
 
 // ─── Reset (used by the "Reset app" path) ─────────────────────────────────────
