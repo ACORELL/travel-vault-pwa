@@ -71,7 +71,8 @@
     #log-list { list-style: none; padding-bottom: 104px; }
     .log-entry { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: flex-start; }
     .log-entry:last-child { border-bottom: none; }
-    .entry-time { font-family: 'Courier New', monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; padding-top: 2px; width: 38px; }
+    .entry-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .entry-time { font-family: 'Courier New', monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; width: 38px; }
     .entry-body { flex: 1; font-size: 14px; line-height: 1.5; }
     .entry-photo-wrap { margin-bottom: 4px; }
     .entry-thumb { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; display: block; }
@@ -100,7 +101,7 @@
     #btn-pending-checkin { width: 100%; padding: 11px; border: 1.5px solid #166534; border-radius: 8px; background: none; font-size: 14px; font-family: inherit; cursor: pointer; font-weight: 500; color: #166534; }
     #btn-pending-checkin:disabled { opacity: 0.45; cursor: default; }
 
-    .author-badge { flex-shrink: 0; align-self: flex-start; margin-top: 1px; width: 20px; height: 20px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+    .author-badge { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; }
 
     .day-nav { display: flex; align-items: center; justify-content: space-between; padding: 2px 0 12px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
     .day-nav-btn { width: 32px; height: 32px; border: 1.5px solid var(--border); border-radius: 8px; background: none; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #1a1a1a; line-height: 1; font-family: inherit; }

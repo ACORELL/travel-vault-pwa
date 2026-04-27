@@ -93,6 +93,8 @@ export async function renderLog() {
     const status = statusFor(entry, pIds, pRefs);
     const debugTag = debugBadgeHtml(entry, status);
 
+    const metaEl = `<div class="entry-meta">${authorBadgeHtml(entry.author)}${timeEl}</div>`;
+
     if (entry.type === 'checkin') {
       groupAuthor = entry.author;
       li.className = 'log-entry checkin';
@@ -100,7 +102,7 @@ export async function renderLog() {
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}${locTag}`
         : '<span class="checkin-no-gps">Location unavailable</span>';
-      li.innerHTML = `${authorBadgeHtml(entry.author)}${timeEl}${debugTag}<div class="entry-body">
+      li.innerHTML = `${metaEl}${debugTag}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else {
@@ -116,7 +118,7 @@ export async function renderLog() {
       } else {
         body = `${esc(entry.content || '')}${locTag ? `<br>${locTag}` : ''}`;
       }
-      li.innerHTML = `${timeEl}${debugTag}<div class="entry-body">${body}</div>`;
+      li.innerHTML = `${metaEl}${debugTag}<div class="entry-body">${body}</div>`;
     }
 
     const apps = entry.appendments || [];
