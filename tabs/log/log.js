@@ -21,6 +21,7 @@ import {
   deleteMany,
   getCached, putCached,
   listAvailableDates, makeId,
+  addTombstone, addPendingAdd,
 } from '../../services/timeline.js';
 import {
   generateFromFile, storeLocal, getLocalUrl, deleteLocal,
@@ -466,6 +467,10 @@ async function applyOptimistic(date, mutator) {
 }
 
 async function commitAdd(date, entry) {
+  // Mark the id as pending-add before the optimistic write so a refresh
+  // racing the atomicEdit (or running while the op sits in the queue)
+  // preserves it from cache instead of wiping it.
+  addPendingAdd(date, entry.id);
   await applyOptimistic(date, xs => [...xs, entry].sort(byT));
   try {
     await addEntry(date, entry);
@@ -478,6 +483,7 @@ async function commitAdd(date, entry) {
 async function commitAddPhoto(date, entry, file) {
   const blob = await generateFromFile(file);
   await storeLocal(entry.ref, blob);
+  addPendingAdd(date, entry.id);
   await applyOptimistic(date, xs => [...xs, entry].sort(byT));
 
   // Thumb first so the timeline.json never points at a missing file. If the
@@ -506,6 +512,7 @@ async function commitAddPhoto(date, entry, file) {
 }
 
 async function commitAddAppendment(date, parentId, appendment) {
+  addPendingAdd(date, appendment.id);
   await applyOptimistic(date, xs => xs.map(e => {
     if (e.id !== parentId) return e;
     return {
@@ -524,6 +531,7 @@ async function commitAddAppendment(date, parentId, appendment) {
 async function commitAddAppendmentPhoto(date, parentId, appendment, file) {
   const blob = await generateFromFile(file);
   await storeLocal(appendment.ref, blob);
+  addPendingAdd(date, appendment.id);
   await applyOptimistic(date, xs => xs.map(e => {
     if (e.id !== parentId) return e;
     return {
@@ -619,6 +627,10 @@ async function replaceThumb(date, ref, file) {
 
 async function commitDeleteEntry(date, entry) {
   const refSink = collectRefs(entry);
+  // Tombstone before optimistic update so a racing refresh can't bring
+  // the entry back if it fetches the remote before atomicEdit's PUT lands.
+  addTombstone(date, entry.id);
+  for (const a of entry.appendments || []) addTombstone(date, a.id);
   await applyOptimistic(date, xs => xs.filter(e => e.id !== entry.id));
   try {
     await deleteEntry(date, entry.id, []);
@@ -632,6 +644,7 @@ async function commitDeleteEntry(date, entry) {
 
 async function commitDeleteAppendment(date, parentId, app) {
   const refSink = app.ref ? [app.ref] : [];
+  addTombstone(date, app.id);
   await applyOptimistic(date, xs => xs.map(e => {
     if (e.id !== parentId) return e;
     return { ...e, appendments: (e.appendments || []).filter(a => a.id !== app.id) };
@@ -655,6 +668,7 @@ async function commitDeleteMany(date, ids) {
     if (e.ref) refSink.push(e.ref);
     for (const a of e.appendments || []) if (a.ref) refSink.push(a.ref);
   }
+  for (const id of ids) addTombstone(date, id);
   await applyOptimistic(date, xs => xs.filter(e => !idSet.has(e.id)));
   try {
     await deleteMany(date, ids, []);
