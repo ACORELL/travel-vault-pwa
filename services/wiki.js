@@ -10,6 +10,8 @@ const FOLDERS = {
   activities:  'activity',
   transport:   'transport',
   areas:       'area',
+  food:        'food',
+  guides:      'guide',
 };
 
 export async function loadWikiPages() {
