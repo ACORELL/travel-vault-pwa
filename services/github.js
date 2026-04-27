@@ -76,9 +76,17 @@ function throwForStatus(res, path) {
   throw new Error(`GitHub ${res.status} on ${path}`);
 }
 
+// All GETs use `cache: 'no-store'` to bypass the browser HTTP cache. The
+// Contents API responds with `Cache-Control: private, max-age=60`, which
+// otherwise causes a refresh shortly after a successful PUT to read the
+// pre-PUT response from disk cache — wiping the just-written entry from
+// the local day-cache (the writer's pendingAdds set is already cleared
+// at that point because the PUT succeeded). Cache-Control headers on the
+// request alone aren't enough; only `cache: 'no-store'` guarantees a
+// network round-trip on every read.
 export async function getFile(path) {
   const { token, repo } = auth();
-  const res = await fetch(url(repo, path), { headers: headers(token) });
+  const res = await fetch(url(repo, path), { headers: headers(token), cache: 'no-store' });
   if (!res.ok) throwForStatus(res, path);
   const json = await res.json();
   return { content: decodeBase64(json.content), sha: json.sha };
@@ -89,7 +97,7 @@ export async function getFile(path) {
 // thumbnails are ~200 KB so we stay comfortably under that.
 export async function getBinary(path, mime = 'application/octet-stream') {
   const { token, repo } = auth();
-  const res = await fetch(url(repo, path), { headers: headers(token) });
+  const res = await fetch(url(repo, path), { headers: headers(token), cache: 'no-store' });
   if (!res.ok) throwForStatus(res, path);
   const json = await res.json();
   const bin = atob((json.content || '').replace(/\n/g, ''));
@@ -100,7 +108,7 @@ export async function getBinary(path, mime = 'application/octet-stream') {
 
 export async function listDir(path) {
   const { token, repo } = auth();
-  const res = await fetch(url(repo, path), { headers: headers(token) });
+  const res = await fetch(url(repo, path), { headers: headers(token), cache: 'no-store' });
   if (!res.ok) throwForStatus(res, path);
   const json = await res.json();
   if (!Array.isArray(json)) throw new Error(`listDir: ${path} is not a directory`);
