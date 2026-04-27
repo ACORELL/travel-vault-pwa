@@ -67,7 +67,7 @@ function statusFor(item, pIds, pRefs) {
 }
 
 function debugBadgeHtml(item, status) {
-  return `<span class="debug-tag debug-${status}" title="author=${item.author} status=${status} id=${esc(item.id)}${item.ref ? ' ref=' + esc(item.ref) : ''}">${item.author}·${STATUS_GLYPH[status]}</span>`;
+  return `<span class="debug-tag debug-${item.author} debug-${status}" title="author=${item.author} status=${status} id=${esc(item.id)}${item.ref ? ' ref=' + esc(item.ref) : ''}">${item.author}·${STATUS_GLYPH[status]}</span>`;
 }
 
 export async function renderLog() {
