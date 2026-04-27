@@ -3,8 +3,8 @@
 import { $, esc, fmtDate } from '../../core/ui.js';
 import { s } from '../../core/state.js';
 
-const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas' };
-const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area'];
+const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas', food: 'Food', guide: 'Guides' };
+const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area', 'food', 'guide'];
 
 export function setupWikiTab() {
   $('wiki-search').addEventListener('input', e => renderWikiList(e.target.value.toLowerCase().trim()));

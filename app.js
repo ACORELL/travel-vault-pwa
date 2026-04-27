@@ -14,7 +14,7 @@ import * as ops from './services/ops.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 59; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 60; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
 // Visible on every screen for at-a-glance "did the new build land?" debugging.
@@ -137,6 +137,7 @@ window.addEventListener('online',  () => {
     tryFlush();
     drainOps();
     refresh.maybeRefresh(s.viewedDate).catch(() => {});
+    loadWiki().catch(() => {});
   }
 });
 
@@ -146,6 +147,7 @@ document.addEventListener('visibilitychange', () => {
   if (!settings.get(GITHUB_PAT) || !settings.get(GITHUB_REPO)) return;
   refresh.maybeRefresh(s.viewedDate).catch(() => {});
   drainOps();
+  loadWiki().catch(() => {});
 });
 
 // Best-effort drain of the timeline mutation queue (services/ops.js).
