@@ -1,8 +1,10 @@
 // Web-quality thumbnail blobs for own captures.
 //
-// generateFromFile resizes via <canvas> to long-edge 1600 px at JPEG q=75
-// (~150-250 KB per photo, ~300 MB for a 30-day 50-photos-per-day trip —
-// comfortable under GitHub's 5 GB recommendation).
+// generateFromFile resizes via <canvas> to long-edge 1200 px at JPEG q=75
+// (~80-140 KB per photo, ~150 MB for a 30-day 50-photos-per-day trip).
+// Thumbs are only used for at-a-glance identification in the PWA timeline
+// — the assembly PWA at home pulls full-resolution originals from the
+// camera roll for the daily snapshot PDFs.
 //
 // The full-resolution File from the camera input is *never* persisted by
 // the PWA. It stays on the phone's camera roll for the assembly PWA at
@@ -17,7 +19,7 @@ const STORE_BLOBS = 'thumbs-local';
 // IDB v1 but is no longer read or written. PHASE5.md §11 marks it as harmless
 // vestigial data — not worth a schema bump to drop.
 
-const LONG_EDGE = 1600;
+const LONG_EDGE = 1200;
 const QUALITY   = 0.75;
 
 let _db = null;
