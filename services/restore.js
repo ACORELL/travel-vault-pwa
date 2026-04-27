@@ -73,8 +73,8 @@ export async function restoreFromRepo(onProgress = () => {}) {
 
     for (const ref of refsIn(dayEntries)) {
       try {
-        const { blob } = await getBinary(`days/${date}/thumbs/${ref}`, 'image/jpeg');
-        await storeLocal(ref, blob);
+        const { blob, sha } = await getBinary(`days/${date}/thumbs/${ref}`, 'image/jpeg');
+        await storeLocal(ref, blob, sha);
         thumbs++;
         onProgress({ phase: 'thumb', date, entries, thumbs });
       } catch (e) {

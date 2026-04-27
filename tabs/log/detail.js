@@ -122,8 +122,7 @@ async function parentHtml(entry) {
 
   let body;
   if (entry.type === 'photo') {
-    const isOwn = entry.author === s.author;
-    const url = isOwn && entry.ref ? await thumbs.getLocalUrl(entry.ref) : null;
+    const url = entry.ref ? await thumbs.getLocalUrl(entry.ref) : null;
     const img = url
       ? `<img class="entry-detail-photo" src="${url}" alt="">`
       : '<div class="entry-detail-photo-placeholder">📷</div>';
@@ -167,7 +166,7 @@ async function singleAppendmentHtml(app) {
 
   let body;
   if (app.ref) {
-    const url = isOwn ? await thumbs.getLocalUrl(app.ref) : null;
+    const url = await thumbs.getLocalUrl(app.ref);
     const img = url
       ? `<img class="appendment-photo" src="${url}" alt="">`
       : '<span class="photo-icon">📷</span>';

@@ -62,15 +62,39 @@ function scaledDims(w, h) {
 }
 
 // ─── Local blob store ─────────────────────────────────────────────────────────
-export async function storeLocal(ref, blob) {
+// Records carry the GitHub blob sha so refresh.syncThumbs can skip refs whose
+// remote bytes haven't changed. Records written before sha tracking existed
+// (or by the writer's own commitAddPhoto, which stores the blob before the
+// PUT returns a sha) have sha=null and will be re-fetched once.
+export async function storeLocal(ref, blob, sha = null) {
   // Invalidate any cached object URL for this ref — after a photo replace
   // the new blob would otherwise still render through the old URL.
   invalidateUrl(ref);
   const store = await tx(STORE_BLOBS, 'readwrite');
   return new Promise((resolve, reject) => {
-    const req = store.put({ ref, blob });
+    const req = store.put({ ref, blob, sha });
     req.onsuccess = () => resolve();
     req.onerror   = () => reject(req.error);
+  });
+}
+
+// Update the sha on an already-stored blob without rewriting the blob itself
+// or invalidating the cached object URL. Used by writer paths after the
+// remote PUT returns the sha so a future syncThumbs sees local==remote and
+// skips re-fetching the writer's own bytes.
+export async function setLocalSha(ref, sha) {
+  const store = await tx(STORE_BLOBS, 'readwrite');
+  return new Promise((resolve, reject) => {
+    const getReq = store.get(ref);
+    getReq.onsuccess = () => {
+      const rec = getReq.result;
+      if (!rec) { resolve(); return; }
+      rec.sha = sha;
+      const putReq = store.put(rec);
+      putReq.onsuccess = () => resolve();
+      putReq.onerror   = () => reject(putReq.error);
+    };
+    getReq.onerror = () => reject(getReq.error);
   });
 }
 
@@ -79,6 +103,15 @@ export async function getLocalBlob(ref) {
   return new Promise((resolve, reject) => {
     const req = store.get(ref);
     req.onsuccess = () => resolve(req.result?.blob || null);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+export async function getLocalSha(ref) {
+  const store = await tx(STORE_BLOBS, 'readonly');
+  return new Promise((resolve, reject) => {
+    const req = store.get(ref);
+    req.onsuccess = () => resolve(req.result?.sha ?? null);
     req.onerror   = () => reject(req.error);
   });
 }

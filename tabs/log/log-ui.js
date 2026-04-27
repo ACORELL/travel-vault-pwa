@@ -2,9 +2,11 @@
 //
 // One LI per parent entry, with appendments rendered inline below the parent
 // (one level deep, D5). Every entry is tappable; the click-handler is wired
-// in Step 7 once the detail-view sheet exists. Own photos render via
-// thumbs.getLocalUrl; other-author photos render as a 📷 icon until
-// restoreFromRepo or a future fetch hydrates the local thumb cache.
+// in Step 7 once the detail-view sheet exists. Photos render via
+// thumbs.getLocalUrl regardless of author — refresh.syncThumbs eagerly
+// pulls every referenced thumb from the data repo into local IDB after each
+// fetchDay, so a render miss only happens during the brief window before the
+// first sync of a fresh install completes (the 📷 placeholder bridges that).
 
 import { $, esc, fmtDate } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
@@ -29,8 +31,8 @@ function authorBadgeHtml(author) {
   return `<span class="author-badge" style="background:${c.badge};color:#fff">${author}</span>`;
 }
 
-async function thumbHtml(ref, isOwn) {
-  if (isOwn && ref) {
+async function thumbHtml(ref) {
+  if (ref) {
     const url = await thumbs.getLocalUrl(ref);
     if (url) return `<img class="entry-thumb" src="${url}" alt="">`;
   }
@@ -42,8 +44,7 @@ async function appendmentHtml(app, status) {
   const time = (app.t || '').slice(11, 16);
   let body;
   if (app.ref) {
-    const isOwn = app.author === s.author;
-    const thumb = await thumbHtml(app.ref, isOwn);
+    const thumb = await thumbHtml(app.ref);
     body = `<div class="appendment-photo-wrap">${thumb}</div>` +
            (app.comment ? `<p class="appendment-comment">${esc(app.comment)}</p>` : '');
   } else {
@@ -110,8 +111,7 @@ export async function renderLog() {
       if (groupAuthor) li.style.background = authorColor(groupAuthor).tint;
       let body;
       if (entry.type === 'photo') {
-        const isOwn = entry.author === s.author;
-        const thumb = await thumbHtml(entry.ref, isOwn);
+        const thumb = await thumbHtml(entry.ref);
         body = `<div class="entry-photo-wrap">${thumb}</div>
           <p class="entry-comment">${esc(entry.comment || '')}</p>
           ${locTag}`;

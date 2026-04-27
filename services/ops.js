@@ -20,7 +20,7 @@ import {
   putFile, deleteFile, getFile,
   GitHubAuthError, GitHubConflictError, GitHubNotFoundError,
 } from './github.js';
-import { getLocalBlob } from './thumbs.js';
+import { getLocalBlob, setLocalSha } from './thumbs.js';
 
 const DB_NAME = 'tv-ops';
 const STORE   = 'queue';
@@ -174,7 +174,9 @@ async function dispatch(op) {
       // Local thumb evicted before flush — the remote will rebuild from
       // tomorrow's restore-from-repo; treat as nothing-to-do.
       if (!blob) return;
-      return putFile(`days/${date}/thumbs/${args.ref}`, blob, `Add thumbnail ${args.ref}`);
+      const { sha } = await putFile(`days/${date}/thumbs/${args.ref}`, blob, `Add thumbnail ${args.ref}`);
+      if (sha) await setLocalSha(args.ref, sha);
+      return;
     }
     case 'delete-thumb': {
       let sha;

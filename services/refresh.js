@@ -18,12 +18,16 @@
 // after a reload where the in-memory pending-adds set is empty but the
 // op is still in IDB.
 
-import { getFile, GitHubAuthError, GitHubNotFoundError } from './github.js';
+import {
+  getFile, getBinary, listDir,
+  GitHubAuthError, GitHubNotFoundError,
+} from './github.js';
 import {
   getCached, putCached,
   getTombstones, getPendingAdds, runOnDateChain,
 } from './timeline.js';
 import * as ops from './ops.js';
+import { storeLocal, getLocalSha } from './thumbs.js';
 
 const THROTTLE_MS = 10_000;
 
@@ -134,6 +138,10 @@ export async function fetchDay(date, { force = false } = {}) {
       }
 
       await putCached(date, entries, sha);
+      // Eager thumb sync: fire and forget so the UI re-renders with the
+      // entries first. syncThumbs re-emits day-changed when any blob lands
+      // or changes, which triggers another render with the thumbnails.
+      syncThumbs(date, entries).catch(() => {});
       return entries;
     } catch (e) {
       if (e instanceof GitHubNotFoundError) {
@@ -153,4 +161,57 @@ export async function fetchDay(date, { force = false } = {}) {
 export async function maybeRefresh(date) {
   if (!isAutoRefreshDue(date)) return null;
   return fetchDay(date);
+}
+
+// ─── Thumbnail sync ───────────────────────────────────────────────────────────
+// Pull every photo thumbnail referenced by the day's timeline into local IDB
+// so renders on devices that didn't capture the photo no longer fall back to
+// the 📷 placeholder. Compares the blob sha returned by listDir against the
+// sha stored in IDB; refs whose bytes haven't changed are skipped, so a
+// repeat refresh with no new captures is one listDir round-trip and zero
+// blob fetches. A change (replaceThumb on another device) flips the remote
+// sha, which mismatches local and triggers a refetch — that's how edits
+// propagate. Re-emits day-changed when at least one blob landed or changed
+// so the renderer picks up the new bytes.
+
+function refsIn(entries) {
+  const refs = [];
+  for (const e of entries) {
+    if (e.ref) refs.push(e.ref);
+    for (const a of e.appendments || []) if (a.ref) refs.push(a.ref);
+  }
+  return refs;
+}
+
+async function syncThumbs(date, entries) {
+  const wanted = new Set(refsIn(entries));
+  if (!wanted.size) return;
+
+  let remote;
+  try {
+    remote = await listDir(`days/${date}/thumbs`);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    if (e instanceof GitHubNotFoundError) return;
+    return;
+  }
+
+  let changed = false;
+  for (const item of remote) {
+    if (item.type !== 'file' || !wanted.has(item.name)) continue;
+    const localSha = await getLocalSha(item.name);
+    if (localSha === item.sha) continue;
+    try {
+      const { blob } = await getBinary(`days/${date}/thumbs/${item.name}`, 'image/jpeg');
+      await storeLocal(item.name, blob, item.sha);
+      changed = true;
+    } catch (e) {
+      if (e instanceof GitHubAuthError) throw e;
+      // best-effort — leave any other ref for the next refresh
+    }
+  }
+
+  if (changed) {
+    window.dispatchEvent(new CustomEvent('day-changed', { detail: { date } }));
+  }
 }

@@ -24,7 +24,7 @@ import {
   addTombstone, addPendingAdd,
 } from '../../services/timeline.js';
 import {
-  generateFromFile, storeLocal, getLocalUrl, deleteLocal,
+  generateFromFile, storeLocal, setLocalSha, getLocalUrl, deleteLocal,
 } from '../../services/thumbs.js';
 import {
   fetchDay, lastRefreshedAt,
@@ -491,8 +491,9 @@ async function commitAddPhoto(date, entry, file) {
   // ship before its thumb does.
   let thumbDirect = false;
   try {
-    await putFile(`days/${date}/thumbs/${entry.ref}`, blob,
-                  `Add thumbnail ${entry.ref}`);
+    const { sha } = await putFile(`days/${date}/thumbs/${entry.ref}`, blob,
+                                  `Add thumbnail ${entry.ref}`);
+    if (sha) await setLocalSha(entry.ref, sha);
     thumbDirect = true;
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
@@ -542,8 +543,9 @@ async function commitAddAppendmentPhoto(date, parentId, appendment, file) {
 
   let thumbDirect = false;
   try {
-    await putFile(`days/${date}/thumbs/${appendment.ref}`, blob,
-                  `Add thumbnail ${appendment.ref}`);
+    const { sha } = await putFile(`days/${date}/thumbs/${appendment.ref}`, blob,
+                                  `Add thumbnail ${appendment.ref}`);
+    if (sha) await setLocalSha(appendment.ref, sha);
     thumbDirect = true;
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
@@ -618,7 +620,8 @@ async function replaceThumb(date, ref, file) {
   const blob = await generateFromFile(file);
   await storeLocal(ref, blob);
   try {
-    await putFile(`days/${date}/thumbs/${ref}`, blob, `Replace thumbnail ${ref}`);
+    const { sha } = await putFile(`days/${date}/thumbs/${ref}`, blob, `Replace thumbnail ${ref}`);
+    if (sha) await setLocalSha(ref, sha);
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
     await ops.enqueue({ kind: 'put-thumb', date, args: { ref } });
