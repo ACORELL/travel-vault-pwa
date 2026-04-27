@@ -53,12 +53,13 @@ async function appendmentHtml(app, status) {
   return `<div class="appendment" style="background:${c.tint}" data-app-id="${esc(app.id)}">
     ${authorBadgeHtml(app.author)}
     <span class="appendment-time">${time}</span>
-    ${debugBadgeHtml(app, status)}
+    ${syncBadgeHtml(app, status)}
     <div class="appendment-body">${body}</div>
   </div>`;
 }
 
-const STATUS_GLYPH = { synced: '✓', pending: '⏳', thumb: '📤' };
+const STATUS_GLYPH = { pending: '⏳', thumb: '📤' };
+const STATUS_LABEL = { pending: 'Sync pending', thumb: 'Uploading thumbnail' };
 
 function statusFor(item, pIds, pRefs) {
   if (pIds.has(item.id)) return 'pending';
@@ -66,8 +67,9 @@ function statusFor(item, pIds, pRefs) {
   return 'synced';
 }
 
-function debugBadgeHtml(item, status) {
-  return `<span class="debug-tag debug-${item.author} debug-${status}" title="author=${item.author} status=${status} id=${esc(item.id)}${item.ref ? ' ref=' + esc(item.ref) : ''}">${item.author}·${STATUS_GLYPH[status]}</span>`;
+function syncBadgeHtml(item, status) {
+  if (status === 'synced') return '';
+  return `<span class="sync-tag sync-${status}" title="${STATUS_LABEL[status]}">${STATUS_GLYPH[status]}</span>`;
 }
 
 export async function renderLog() {
@@ -79,7 +81,7 @@ export async function renderLog() {
   }
   list.innerHTML = '';
 
-  // Pull pending-op state once per render so each entry's debug badge
+  // Pull pending-op state once per render so each entry's sync badge
   // reflects the same snapshot of the queue.
   const [pIds, pRefs] = await Promise.all([pendingIds(), pendingThumbRefs()]);
 
@@ -92,7 +94,7 @@ export async function renderLog() {
     const timeEl = `<span class="entry-time">${entryHHMM(entry)}</span>`;
     const locTag = entry.gps ? '<span class="entry-loc">Location ✓</span>' : '';
     const status = statusFor(entry, pIds, pRefs);
-    const debugTag = debugBadgeHtml(entry, status);
+    const syncTag = syncBadgeHtml(entry, status);
 
     const metaEl = `<div class="entry-meta">${authorBadgeHtml(entry.author)}${timeEl}</div>`;
 
@@ -103,7 +105,7 @@ export async function renderLog() {
       const locationHtml = entry.gps
         ? `${checkinMapHtml(entry.gps.lat, entry.gps.lon)}${locTag}`
         : '<span class="checkin-no-gps">Location unavailable</span>';
-      li.innerHTML = `${metaEl}${debugTag}<div class="entry-body">
+      li.innerHTML = `${metaEl}${syncTag}<div class="entry-body">
         <span class="checkin-label">📍 Checked in</span>${locationHtml}
       </div>`;
     } else {
@@ -118,7 +120,7 @@ export async function renderLog() {
       } else {
         body = `${esc(entry.content || '')}${locTag ? `<br>${locTag}` : ''}`;
       }
-      li.innerHTML = `${metaEl}${debugTag}<div class="entry-body">${body}</div>`;
+      li.innerHTML = `${metaEl}${syncTag}<div class="entry-body">${body}</div>`;
     }
 
     const apps = entry.appendments || [];

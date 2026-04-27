@@ -154,11 +154,11 @@
 
     /* Per-entry debug badge — author letter + sync-status glyph */
     .log-entry { position: relative; }
-    .debug-tag { position: absolute; top: 4px; right: 6px; font-size: 10px; font-family: 'Courier New', monospace; padding: 2px 5px; border-radius: 3px; color: #fff; line-height: 1.2; pointer-events: none; }
-    .debug-N { background: #c2185b; }
-    .debug-A { background: #1565c0; }
+    .sync-tag { position: absolute; top: 4px; right: 6px; font-size: 11px; line-height: 1; padding: 2px 4px; border-radius: 3px; pointer-events: none; }
+    .sync-pending { background: #fde68a; color: #92400e; }
+    .sync-thumb   { background: #bfdbfe; color: #1e40af; }
     .appendment { position: relative; }
-    .appendment .debug-tag { top: 4px; right: 6px; }
+    .appendment .sync-tag { top: 4px; right: 6px; }
 
     /* Appendments — used by both the log list and the detail view */
     .entry-appendments { margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
