@@ -14,7 +14,7 @@ import * as ops from './services/ops.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 52; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 53; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
 // Visible on every screen for at-a-glance "did the new build land?" debugging.
@@ -38,6 +38,13 @@ async function init() {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') reg.update().catch(() => {});
       });
+      // Poll every 60s while the tab is visible — Firefox Android
+      // otherwise honours the HTTP cache TTL on sw.js and can sit on a
+      // stale build for several minutes after a deploy with no
+      // visibilitychange to trigger an update check.
+      setInterval(() => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      }, 60_000);
     }
   }
   if (navigator.storage?.persist) {
