@@ -13,6 +13,7 @@
 import { $, esc, show, hide } from '../../core/ui.js';
 import { s } from '../../core/state.js';
 import * as thumbs from '../../services/thumbs.js';
+import { getCached } from '../../services/timeline.js';
 import { AUTHOR_COLORS } from './log-ui.js';
 
 const TYPE_LABELS = { checkin: 'Check-in', note: 'Note', photo: 'Photo' };
@@ -73,9 +74,15 @@ export function setupDetailView() {
     window.dispatchEvent(new CustomEvent('appendment-add-photo-requested', { detail: { parentId } }));
   });
 
-  window.addEventListener('day-changed', e => {
+  // Read cache directly — log.js's parallel day-changed listener kicks
+  // off loadLog asynchronously, so s.logEntries is still stale at the
+  // moment our handler runs and would falsely report the just-deleted
+  // entry as "still exists".
+  window.addEventListener('day-changed', async e => {
     if (e.detail?.date !== s.viewedDate || !s.viewingEntry) return;
-    const stillExists = s.logEntries.some(x => x.id === s.viewingEntry);
+    const cached = await getCached(s.viewedDate);
+    const entries = cached?.entries || [];
+    const stillExists = entries.some(x => x.id === s.viewingEntry);
     if (!stillExists) { closeDetail(); return; }
     renderDetail();
   });
@@ -94,8 +101,11 @@ function closeDetail() {
 
 async function renderDetail() {
   if (!s.viewingEntry) return;
-  const entry = s.logEntries.find(e => e.id === s.viewingEntry);
-  if (!entry) return;
+  // Same staleness reason as the day-changed handler — read cache.
+  const cached = await getCached(s.viewedDate);
+  const entries = cached?.entries || s.logEntries;
+  const entry = entries.find(e => e.id === s.viewingEntry);
+  if (!entry) { closeDetail(); return; }
 
   const time = (entry.t || '').slice(11, 16);
   $('entry-detail-title').textContent =

@@ -102,13 +102,99 @@ export function makeId(t, author, existingEntries = []) {
   throw new Error('makeId: too many collisions');
 }
 
+// ─── Tombstones ───────────────────────────────────────────────────────────────
+// Ids (parent or appendment) the user has optimistically deleted but whose
+// remote delete atomicEdit hasn't confirmed yet. Both atomicEdit's tail
+// merge and refresh.fetchDay's putCached filter these out, so a refresh
+// racing the user's own delete (atomicEdit still in flight) doesn't
+// resurrect the deleted entry. Cleared once atomicEdit successfully PUTs
+// a state that no longer contains the id — at that point the remote
+// definitely doesn't have it, and a future fetch can't bring it back.
+//
+// In-memory only. A full page reload mid-delete drops the tombstone; the
+// queued op still drains and removes the entry properly, just with a
+// brief visual flicker if the user reloaded fast enough to catch it.
+
+const _tombstones = new Map();
+
+export function addTombstone(date, id) {
+  let set = _tombstones.get(date);
+  if (!set) { set = new Set(); _tombstones.set(date, set); }
+  set.add(id);
+}
+
+export function getTombstones(date) {
+  return _tombstones.get(date) || new Set();
+}
+
+function clearConfirmedTombstones(date, canonicalEntries) {
+  const set = _tombstones.get(date);
+  if (!set || !set.size) return;
+  const allIds = new Set();
+  for (const e of canonicalEntries) {
+    allIds.add(e.id);
+    for (const a of e.appendments || []) allIds.add(a.id);
+  }
+  for (const id of [...set]) {
+    if (!allIds.has(id)) set.delete(id);
+  }
+  if (!set.size) _tombstones.delete(date);
+}
+
+// ─── Pending optimistic adds ──────────────────────────────────────────────────
+// Mirror of tombstones for the add direction: ids the user has optimistically
+// added but whose atomicEdit hasn't confirmed on remote yet. refresh.fetchDay
+// preserves these from cache when the GET response doesn't include them, so
+// a refresh racing an in-flight (or queued) add doesn't briefly wipe the
+// new entry. Cleared in atomicEdit's tail once the canonical PUT contains
+// the id — at that point the remote has it and a future fetchDay can drop
+// the cached copy if some other device has since deleted it.
+//
+// In-memory only. After a reload the set is empty, but the queued op (if
+// any) is still in IDB — refresh.fetchDay ALSO consults ops.pendingIds()
+// to cover that case. Both sources together protect both the live-race
+// window (pending-adds) and the queued-add-after-reload window (ops queue).
+//
+// Naming: only ADDs go through here. Edits don't change ids and are
+// guarded by the per-date chain serialization (refresh.fetchDay can't
+// run between an edit's GET and PUT, so the cached edited copy survives).
+// Deletes use tombstones.
+
+const _pendingAdds = new Map();
+
+export function addPendingAdd(date, id) {
+  let set = _pendingAdds.get(date);
+  if (!set) { set = new Set(); _pendingAdds.set(date, set); }
+  set.add(id);
+}
+
+export function getPendingAdds(date) {
+  return _pendingAdds.get(date) || new Set();
+}
+
+function clearConfirmedAdds(date, canonicalEntries) {
+  const set = _pendingAdds.get(date);
+  if (!set || !set.size) return;
+  const allIds = new Set();
+  for (const e of canonicalEntries) {
+    allIds.add(e.id);
+    for (const a of e.appendments || []) allIds.add(a.id);
+  }
+  for (const id of [...set]) {
+    if (allIds.has(id)) set.delete(id);
+  }
+  if (!set.size) _pendingAdds.delete(date);
+}
+
 // ─── Per-date promise chain (intra-device mutex, D3) ──────────────────────────
-// Two rapid taps on the same date can't race themselves. Cross-device races
-// rely on atomicEdit's sha-retry loop.
+// Two rapid taps on the same date can't race themselves; an add+refresh on
+// the same date can't interleave the refresh's GET with the add's PUT.
+// Both atomicEdit and refresh.fetchDay funnel through here. Cross-device
+// races still rely on atomicEdit's sha-retry loop.
 
 const _chains = new Map();
 
-function chain(date, fn) {
+export function runOnDateChain(date, fn) {
   const last = _chains.get(date) || Promise.resolve();
   const next = last.catch(() => {}).then(fn);
   _chains.set(date, next);
@@ -123,7 +209,7 @@ function chain(date, fn) {
 // to clear itself at the start of each call.
 
 export async function atomicEdit(date, mutator) {
-  return chain(date, async () => {
+  return runOnDateChain(date, async () => {
     const path = pathFor(date);
     let lastConflict;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -146,7 +232,24 @@ export async function atomicEdit(date, mutator) {
           `Update ${date} timeline`,
           sha,
         );
-        await putCached(date, next, newSha);
+        // Merge canonical `next` with the optimistic state currently in
+        // cache. Plain putCached(next, …) would wipe entries that other
+        // in-flight atomicEdits in this date's chain have just added
+        // optimistically — they aren't on the remote yet, so atomicEdit's
+        // own getFile didn't see them. Preserve those, but DROP anything
+        // the user has tombstoned (optimistic-deleted) so a racing refresh
+        // can't resurrect them.
+        const merged = await mergeWithCached(date, next);
+        // Confirmed deletes: ids that were in `current` (the remote we
+        // fetched) but are not in `next` (after the mutator removed
+        // them). Their tombstones can be cleared — the remote no longer
+        // has them after this PUT.
+        clearConfirmedTombstones(date, next);
+        // Confirmed adds: ids present in `next` are now on remote, so a
+        // future fetchDay will see them and the pending-add preservation
+        // is no longer needed.
+        clearConfirmedAdds(date, next);
+        await putCached(date, merged, newSha);
         return next;
       } catch (e) {
         if (e instanceof GitHubAuthError) throw e;
@@ -156,6 +259,60 @@ export async function atomicEdit(date, mutator) {
     }
     throw lastConflict || new GitHubConflictError(`atomicEdit gave up on ${pathFor(date)}`);
   });
+}
+
+// Merge atomicEdit's canonical `next` with any optimistic state present in
+// the local day-cache. Two cases of "preservable" cached state:
+//   1. Parent entries in cache but not in next — another in-flight
+//      atomicEdit added them and is still queued behind us in the chain.
+//      Keep them; that atomicEdit's own tail will reconcile when it lands.
+//   2. Appendments under a parent that exists in both: keep cached
+//      appendments whose ids aren't in next's appendment list (same
+//      reason — appendment ops chained behind us).
+//
+// Parents in next always win for the parent fields themselves (canonical
+// edits beat the optimistic copy), but their appendment array gets merged
+// with the cached copy so concurrent appendment ops don't get clobbered.
+async function mergeWithCached(date, next) {
+  const cached = await getCached(date);
+  const cachedEntries = cached?.entries || [];
+  const tombstones = getTombstones(date);
+
+  // Strip tombstoned ids from next first — covers the case of a queued
+  // op replaying an entry the user has since deleted (op queue ordering
+  // can interleave with user actions), or a mutator returning state that
+  // we want to mask out locally regardless.
+  const stripTombstoned = list => list.map(e => {
+    if (tombstones.has(e.id)) return null;
+    const apps = e.appendments || [];
+    if (!apps.length) return e;
+    const filtered = apps.filter(a => !tombstones.has(a.id));
+    return filtered.length === apps.length ? e : { ...e, appendments: filtered };
+  }).filter(Boolean);
+
+  const cleanedNext = tombstones.size ? stripTombstoned(next) : next;
+  if (!cachedEntries.length) return cleanedNext;
+
+  const cachedById = new Map(cachedEntries.map(e => [e.id, e]));
+  const nextIds    = new Set(cleanedNext.map(e => e.id));
+
+  const mergedNext = cleanedNext.map(nextParent => {
+    const cachedParent = cachedById.get(nextParent.id);
+    if (!cachedParent) return nextParent;
+    const nextApps    = nextParent.appendments || [];
+    let cachedApps    = cachedParent.appendments || [];
+    if (tombstones.size) cachedApps = cachedApps.filter(a => !tombstones.has(a.id));
+    if (!cachedApps.length) return nextParent;
+    const nextAppIds  = new Set(nextApps.map(a => a.id));
+    const preservedApps = cachedApps.filter(a => !nextAppIds.has(a.id));
+    if (!preservedApps.length) return nextParent;
+    return { ...nextParent, appendments: [...nextApps, ...preservedApps].sort(byT) };
+  });
+
+  let preservedParents = cachedEntries.filter(e => !nextIds.has(e.id));
+  if (tombstones.size) preservedParents = preservedParents.filter(e => !tombstones.has(e.id));
+  if (!preservedParents.length) return mergedNext.sort(byT);
+  return [...mergedNext, ...preservedParents].sort(byT);
 }
 
 // ─── Mutators (named exports — see PHASE5.md §5) ──────────────────────────────

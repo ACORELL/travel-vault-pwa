@@ -1,7 +1,8 @@
 # Phase 4 — Plan: capture PWA backend rewrite (FSA → local-first + deferred GitHub sync)
 
-**Current state: Plan drafted, not yet confirmed for execution. No code changes yet.**
-**Next: User reviews decisions D1–D8, then `/effort high` execution session begins.**
+**Current state: Done.** All 11 numbered steps in section 11 shipped through one commit each. `services/vault.js` and `db.js` deleted; capture writes go to local IDB via `services/timeline.js` + `services/thumbs.js`; deferred publish via `services/sync.js`. See PROGRESS.md for the deploy version.
+
+**One divergence from plan**: D2 said photo thumbnails would flow through `services/queue.js`. They go via direct `putFile` instead — `thumbs-local` + `thumbs-sync-state` already provides the per-ref offline durability the queue would replicate, and routing through the queue would force an extension to know which items succeeded (which D2 forbids). The queue contract stays preserved; it continues to handle raw note captures.
 
 ---
 
