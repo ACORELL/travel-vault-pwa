@@ -3,7 +3,6 @@
 
 export const GITHUB_PAT  = 'tv-github-pat';
 export const GITHUB_REPO = 'tv-github-repo';
-export const WORKER_URL  = 'tv-worker-url';
 export const AUTHOR      = 'tv-author';
 
 const LEGACY_AUTHOR_KEY = 'tv-author';
@@ -40,6 +39,5 @@ export function clear() {
 export function reset() {
   localStorage.removeItem(GITHUB_PAT);
   localStorage.removeItem(GITHUB_REPO);
-  localStorage.removeItem(WORKER_URL);
   localStorage.removeItem(AUTHOR);
 }
