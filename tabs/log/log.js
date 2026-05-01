@@ -105,6 +105,56 @@ export function setupLogTab() {
   window.addEventListener('ops-changed', () => loadLog());
 }
 
+// ─── GPS trust check ──────────────────────────────────────────────────────────
+//
+// When a photo is added (or, in future, Replace falls back to live geoloc),
+// the device's geolocation reflects WHERE THE CURATOR IS RIGHT NOW — not
+// necessarily where the photo was taken. If the curator is at home,
+// hundreds of km from the trip, attaching their living-room coordinates to
+// a trip photo is worse than no GPS at all.
+//
+// Rule: compare the sampled gps against the day's check-in coordinates.
+// If the nearest check-in is farther than GPS_TRUST_KM, suppress the gps
+// (return null). If the day has no check-ins with gps, trust the sample
+// (no reference point to disagree with).
+//
+// 2 km is a conservative trip-walking radius. Tune if it drops legitimate
+// captures or accepts wrong ones.
+
+const GPS_TRUST_KM = 2;
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2
+          + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Returns { gps, distanceKm } — gps is the original sample if trusted, null
+// if suppressed. distanceKm is the nearest-checkin distance (or null when
+// no check-ins exist on this day, in which case gps passes through).
+async function trustGpsForDay(date, gps) {
+  if (!gps) return { gps: null, distanceKm: null };
+  const cached = await getCached(date);
+  const checkins = (cached?.entries || []).filter(e => e.type === 'checkin' && e.gps);
+  if (!checkins.length) return { gps, distanceKm: null };
+  let nearestKm = Infinity;
+  for (const c of checkins) {
+    const d = haversineKm(gps, c.gps);
+    if (d < nearestKm) nearestKm = d;
+  }
+  if (nearestKm > GPS_TRUST_KM) {
+    console.warn(`[gps] suppressed: ${nearestKm.toFixed(1)} km from nearest check-in (threshold ${GPS_TRUST_KM} km)`);
+    return { gps: null, distanceKm: nearestKm };
+  }
+  return { gps, distanceKm: nearestKm };
+}
+
 // ─── Capture (add) ────────────────────────────────────────────────────────────
 
 async function addCheckin() {
@@ -222,12 +272,21 @@ async function onPhotoSelected(e) {
   prev.src = prev._url;
   prev.hidden = false;
 
-  const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  const sampled = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+  const sampledNorm = sampled ? { lat: sampled.lat, lon: sampled.lon } : null;
+  const trust = await trustGpsForDay(s.viewedDate, sampledNorm);
   if (s.composing?.kind === 'add-photo' || s.composing?.kind === 'append-photo') {
-    s.composing.gps = gps ? { lat: gps.lat, lon: gps.lon } : null;
+    s.composing.gps = trust.gps;
   }
   const meta = $('photo-preview-meta');
-  const gpsLine = gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : 'GPS unavailable';
+  let gpsLine;
+  if (trust.gps) {
+    gpsLine = `${trust.gps.lat.toFixed(5)}, ${trust.gps.lon.toFixed(5)}`;
+  } else if (sampledNorm && trust.distanceKm !== null) {
+    gpsLine = `GPS suppressed (${trust.distanceKm.toFixed(1)} km from nearest check-in)`;
+  } else {
+    gpsLine = 'GPS unavailable';
+  }
   meta.textContent = `${file.name || '(unnamed)'} · ${gpsLine}`;
   meta.hidden = false;
 
