@@ -50,9 +50,10 @@ async function appendmentHtml(app, status) {
   } else {
     body = `<p class="appendment-content">${esc(app.content || '')}</p>`;
   }
-  return `<div class="appendment" style="background:${c.tint}" data-app-id="${esc(app.id)}">
+  // Time hidden on the front page (visible on tap-into-detail); kept in the
+  // title attribute for hover-discoverability.
+  return `<div class="appendment" style="background:${c.tint}" data-app-id="${esc(app.id)}" title="Added at ${time}">
     ${authorBadgeHtml(app.author)}
-    <span class="appendment-time">${time}</span>
     ${syncBadgeHtml(app, status)}
     <div class="appendment-body">${body}</div>
   </div>`;
@@ -90,12 +91,18 @@ export async function renderLog() {
   for (const entry of s.logEntries) {
     const li = document.createElement('li');
     li.dataset.entryId = entry.id;
+    li.title = `Added at ${entryHHMM(entry)}`;
     const ec = authorColor(entry.author);
-    const timeEl = `<span class="entry-time">${entryHHMM(entry)}</span>`;
     const locTag = entry.gps ? '<span class="entry-loc">Location ✓</span>' : '';
     const status = statusFor(entry, pIds, pRefs);
     const syncTag = syncBadgeHtml(entry, status);
 
+    // Check-ins keep the visible time — they're the trip's location
+    // heartbeat. Notes/photos hide it on the front page (still shown in the
+    // detail view when expanded). Discoverable via the row's title attribute.
+    const timeEl = entry.type === 'checkin'
+      ? `<span class="entry-time">${entryHHMM(entry)}</span>`
+      : '';
     const metaEl = `<div class="entry-meta">${authorBadgeHtml(entry.author)}${timeEl}</div>`;
 
     if (entry.type === 'checkin') {

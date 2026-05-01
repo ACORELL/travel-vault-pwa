@@ -6,7 +6,7 @@
 // After bumping: git commit, push, done. The SW activate handler cleans up
 // all old cache entries automatically.
 // ─────────────────────────────────────────────────────────────────────────────
-const CACHE = 'tv-phone-v65';
+const CACHE = 'tv-phone-v66';
 
 // DEV_MODE: set true to bypass the SW cache entirely while iterating locally.
 // Every request goes straight to the network — no manual cache-clear needed.

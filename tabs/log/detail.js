@@ -108,8 +108,12 @@ async function renderDetail() {
   if (!entry) { closeDetail(); return; }
 
   const time = (entry.t || '').slice(11, 16);
+  // Check-ins show their time prominently on the log front page (they're
+  // the trip's location heartbeat); for notes/photos the time is hidden on
+  // the front and surfaced here as "added HH:MM".
+  const timeLabel = entry.type === 'checkin' ? time : `added ${time}`;
   $('entry-detail-title').textContent =
-    `${TYPE_LABELS[entry.type] || entry.type} · ${time} · ${entry.author}`;
+    `${TYPE_LABELS[entry.type] || entry.type} · ${timeLabel} · ${entry.author}`;
 
   $('entry-detail-parent').innerHTML      = await parentHtml(entry);
   $('entry-detail-actions').innerHTML     = parentActionsHtml(entry);
@@ -183,7 +187,7 @@ async function singleAppendmentHtml(app) {
 
   return `<div class="appendment" style="background:${c.tint}" data-app-id="${esc(app.id)}">
     <span class="author-badge" style="background:${c.badge};color:#fff">${app.author}</span>
-    <span class="appendment-time">${time}</span>
+    <span class="appendment-time">added ${time}</span>
     <div class="appendment-body">${body}</div>
     <div class="appendment-actions">${editBtn}${deleteBtn}</div>
   </div>`;
