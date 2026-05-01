@@ -83,9 +83,11 @@ export function setupLogTab() {
   // Detail-view action triggers (parent + appendment edit/delete). detail.js
   // dispatches; we listen here so the cycle stays one-way (log.js → detail.js).
   window.addEventListener('entry-edit-requested',           e => startEditEntry(e.detail.id));
+  window.addEventListener('entry-replace-requested',        e => startReplaceEntry(e.detail.id));
   window.addEventListener('entry-delete-requested',         e => deleteEntryRequested(e.detail.id));
   window.addEventListener('checkin-delete-requested',       e => deleteCheckinGroupRequested(e.detail.id));
   window.addEventListener('appendment-edit-requested',      e => startEditAppendment(e.detail.parentId, e.detail.appId));
+  window.addEventListener('appendment-replace-requested',   e => startReplaceAppendment(e.detail.parentId, e.detail.appId));
   window.addEventListener('appendment-delete-requested',    e => deleteAppendmentRequested(e.detail.parentId, e.detail.appId));
   window.addEventListener('appendment-add-comment-requested', e => startAddAppendmentComment(e.detail.parentId));
   window.addEventListener('appendment-add-photo-requested',   e => startAddAppendmentPhoto(e.detail.parentId));
@@ -431,6 +433,30 @@ function startEditEntry(entryId) {
     s.composing = { kind: 'edit-photo', entryId, ref: entry.ref };
     setupPhotoFormForEdit(entry);
   }
+}
+
+// Direct-replace shortcut: skip the Edit gate entirely. Set the composing
+// kind to edit-photo, prep the photo form (so the Save button is reachable
+// after the user picks a file), then trigger the file picker. The detail-
+// view handler closes its sheet before dispatching, so the picker overlays
+// the log front page. onPhotoSelected sees kind=edit-photo and runs the
+// swap path; submitPhoto then commits via commitEditPhoto.
+async function startReplaceEntry(entryId) {
+  const entry = s.logEntries.find(e => e.id === entryId);
+  if (!entry || entry.author !== s.author || entry.type !== 'photo') return;
+  s.composing = { kind: 'edit-photo', entryId, ref: entry.ref };
+  await setupPhotoFormForEdit(entry);
+  $('photo-input').click();
+}
+
+async function startReplaceAppendment(parentId, appId) {
+  const parent = s.logEntries.find(e => e.id === parentId);
+  if (!parent) return;
+  const app = (parent.appendments || []).find(a => a.id === appId);
+  if (!app || app.author !== s.author || !app.ref) return;
+  s.composing = { kind: 'edit-appendment-photo', parentId, appId, ref: app.ref };
+  await setupPhotoFormForEdit(app);
+  $('photo-input').click();
 }
 
 function startEditAppendment(parentId, appId) {

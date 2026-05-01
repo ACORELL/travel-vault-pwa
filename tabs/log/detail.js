@@ -35,6 +35,9 @@ export function setupDetailView() {
     if (action === 'edit') {
       closeDetail();
       window.dispatchEvent(new CustomEvent('entry-edit-requested', { detail: { id: entryId } }));
+    } else if (action === 'replace') {
+      closeDetail();
+      window.dispatchEvent(new CustomEvent('entry-replace-requested', { detail: { id: entryId } }));
     } else if (action === 'delete') {
       window.dispatchEvent(new CustomEvent('entry-delete-requested', { detail: { id: entryId } }));
     } else if (action === 'delete-checkin') {
@@ -54,6 +57,9 @@ export function setupDetailView() {
     if (action === 'edit-app') {
       closeDetail();
       window.dispatchEvent(new CustomEvent('appendment-edit-requested', { detail: { parentId, appId } }));
+    } else if (action === 'replace-app') {
+      closeDetail();
+      window.dispatchEvent(new CustomEvent('appendment-replace-requested', { detail: { parentId, appId } }));
     } else if (action === 'delete-app') {
       window.dispatchEvent(new CustomEvent('appendment-delete-requested', { detail: { parentId, appId } }));
     }
@@ -144,14 +150,19 @@ function parentActionsHtml(entry) {
   // D6: only the original author can edit (and check-ins aren't editable —
   // GPS auto-sets, no content/comment to change). D7: either author can
   // delete; check-in deletes cascade through the next-checkin window.
+  // Replace is a top-level shortcut on photo entries — opens the file
+  // picker directly so swapping a photo doesn't require Edit-then-Replace.
   const isOwn = entry.author === s.author;
   const editable = entry.type !== 'checkin';
+  const replaceBtn = (isOwn && entry.type === 'photo')
+    ? '<button class="entry-detail-action-replace" data-action="replace">Replace</button>'
+    : '';
   const editBtn = (isOwn && editable)
     ? '<button class="entry-detail-action-edit" data-action="edit">Edit</button>'
     : '';
   const isCheckin = entry.type === 'checkin';
   const deleteBtn = `<button class="entry-detail-action-delete" data-action="${isCheckin ? 'delete-checkin' : 'delete'}">Delete</button>`;
-  return `${editBtn}${deleteBtn}`;
+  return `${replaceBtn}${editBtn}${deleteBtn}`;
 }
 
 async function appendmentsHtml(apps) {
@@ -180,6 +191,11 @@ async function singleAppendmentHtml(app) {
     body = `<p class="appendment-content">${esc(app.content || '')}</p>`;
   }
 
+  // Replace shortcut on photo appendments only — same rationale as the
+  // parent-level Replace: open the file picker directly without an Edit gate.
+  const replaceBtn = (isOwn && app.ref)
+    ? `<button data-action="replace-app" data-app-id="${esc(app.id)}">Replace</button>`
+    : '';
   const editBtn = isOwn
     ? `<button data-action="edit-app" data-app-id="${esc(app.id)}">Edit</button>`
     : '';
@@ -189,6 +205,6 @@ async function singleAppendmentHtml(app) {
     <span class="author-badge" style="background:${c.badge};color:#fff">${app.author}</span>
     <span class="appendment-time">added ${time}</span>
     <div class="appendment-body">${body}</div>
-    <div class="appendment-actions">${editBtn}${deleteBtn}</div>
+    <div class="appendment-actions">${replaceBtn}${editBtn}${deleteBtn}</div>
   </div>`;
 }
