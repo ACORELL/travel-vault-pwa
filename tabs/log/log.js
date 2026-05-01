@@ -604,7 +604,12 @@ async function commitEditPhoto(date, id, patch, replacedFile) {
       oldRef = entry.ref || null;
       const swap = await prepareReplacedSource(date, entry, replacedFile);
       if (swap.error) { alert(swap.error); return; }
-      mergedPatch = { ...patch, ref: swap.newRef, t: swap.newT, gps: swap.gps };
+      // sourcePath: null — phone Replace pulls from the camera roll, which
+      // is not the laptop's /photo-source mount. Any prior sourcePath
+      // (from a previous laptop Replace/Add) is now stale and must be
+      // cleared, otherwise the laptop's matchStatus reports a false ✓
+      // matched against an unrelated PC file.
+      mergedPatch = { ...patch, ref: swap.newRef, t: swap.newT, gps: swap.gps, sourcePath: null };
     }
   }
   await commitEdit(date, id, mergedPatch);
@@ -623,7 +628,12 @@ async function commitEditAppendmentPhoto(date, parentId, appId, patch, replacedF
       oldRef = app.ref || null;
       const swap = await prepareReplacedSource(date, app, replacedFile);
       if (swap.error) { alert(swap.error); return; }
-      mergedPatch = { ...patch, ref: swap.newRef, t: swap.newT, gps: swap.gps };
+      // sourcePath: null — phone Replace pulls from the camera roll, which
+      // is not the laptop's /photo-source mount. Any prior sourcePath
+      // (from a previous laptop Replace/Add) is now stale and must be
+      // cleared, otherwise the laptop's matchStatus reports a false ✓
+      // matched against an unrelated PC file.
+      mergedPatch = { ...patch, ref: swap.newRef, t: swap.newT, gps: swap.gps, sourcePath: null };
     }
   }
   await commitEditAppendment(date, parentId, appId, mergedPatch);
