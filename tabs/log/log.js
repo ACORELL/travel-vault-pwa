@@ -105,21 +105,27 @@ export function setupLogTab() {
   window.addEventListener('ops-changed', () => loadLog());
 }
 
-// ─── GPS trust check ──────────────────────────────────────────────────────────
+// ─── GPS / check-in coupling ──────────────────────────────────────────────────
 //
-// When a photo is added (or, in future, Replace falls back to live geoloc),
-// the device's geolocation reflects WHERE THE CURATOR IS RIGHT NOW — not
-// necessarily where the photo was taken. If the curator is at home,
-// hundreds of km from the trip, attaching their living-room coordinates to
-// a trip photo is worse than no GPS at all.
+// Check-ins are the trip's location heartbeat. New phone captures (notes,
+// photos, appendments) follow this rule:
 //
-// Rule: compare the sampled gps against the day's check-in coordinates.
-// If the nearest check-in is farther than GPS_TRUST_KM, suppress the gps
-// (return null). If the day has no check-ins with gps, trust the sample
-// (no reference point to disagree with).
+//   - Sample geolocation.
+//   - If the sample is within GPS_TRUST_KM of any check-in already on this
+//     day, attach the gps to the entry — same trip-segment, the existing
+//     check-in covers it.
+//   - If the sample is OUTSIDE the radius (or the day has no check-ins
+//     yet), mint a new check-in at the sampled location just before the
+//     entry, then attach the same gps to the entry. The trip's check-in
+//     graph self-extends — the user doesn't have to manually check in
+//     every time they move.
+//   - If the sample fails (null), the entry gets gps: null and no
+//     check-in is minted.
 //
-// 2 km is a conservative trip-walking radius. Tune if it drops legitimate
-// captures or accepts wrong ones.
+// Edits, Replace, and laptop-side picker flows are exempt — they don't
+// sample live geolocation. Couch-curation from the laptop is location-free.
+//
+// 2 km is a conservative trip-walking radius. Tune via GPS_TRUST_KM.
 
 const GPS_TRUST_KM = 2;
 
@@ -135,24 +141,46 @@ function haversineKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// Returns { gps, distanceKm } — gps is the original sample if trusted, null
-// if suppressed. distanceKm is the nearest-checkin distance (or null when
-// no check-ins exist on this day, in which case gps passes through).
-async function trustGpsForDay(date, gps) {
-  if (!gps) return { gps: null, distanceKm: null };
+// Subtract one second from an ISO timestamp (YYYY-MM-DDTHH:MM:SS). Used to
+// place the auto-minted check-in just before the entry that triggered it.
+function shiftIsoSeconds(iso, deltaSec) {
+  const d = new Date(iso + 'Z');
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Date(d.getTime() + deltaSec * 1000).toISOString().slice(0, 19);
+}
+
+// Decide what to do with a sampled gps for a new capture on `date`.
+// Returns { gps, mintedCheckin, distanceKm } where mintedCheckin (if
+// non-null) must be committed BEFORE the triggering entry so atomicEdit's
+// timeline ordering is consistent on read.
+async function resolveGpsAndMaybeCheckin({ date, gps, t, author }) {
+  if (!gps) return { gps: null, mintedCheckin: null, distanceKm: null };
   const cached = await getCached(date);
-  const checkins = (cached?.entries || []).filter(e => e.type === 'checkin' && e.gps);
-  if (!checkins.length) return { gps, distanceKm: null };
+  const entries = cached?.entries || [];
+  const checkins = entries.filter(e => e.type === 'checkin' && e.gps);
   let nearestKm = Infinity;
   for (const c of checkins) {
     const d = haversineKm(gps, c.gps);
     if (d < nearestKm) nearestKm = d;
   }
-  if (nearestKm > GPS_TRUST_KM) {
-    console.warn(`[gps] suppressed: ${nearestKm.toFixed(1)} km from nearest check-in (threshold ${GPS_TRUST_KM} km)`);
-    return { gps: null, distanceKm: nearestKm };
+  if (checkins.length && nearestKm <= GPS_TRUST_KM) {
+    return { gps, mintedCheckin: null, distanceKm: nearestKm };
   }
-  return { gps, distanceKm: nearestKm };
+  // Outside radius (or no check-ins yet) — mint a check-in just before
+  // the entry's t so it sorts immediately ahead.
+  const checkinT = shiftIsoSeconds(t, -1);
+  const mintedCheckin = {
+    id: makeId(checkinT, author, entries),
+    type: 'checkin',
+    author,
+    t: checkinT,
+    gps,
+  };
+  return {
+    gps,
+    mintedCheckin,
+    distanceKm: nearestKm === Infinity ? null : nearestKm,
+  };
 }
 
 // ─── Capture (add) ────────────────────────────────────────────────────────────
@@ -203,16 +231,19 @@ async function submitNote() {
   btn.textContent = c.kind === 'add-note' ? 'Adding…' : 'Saving…';
 
   if (c.kind === 'add-note') {
-    const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const sampled = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const sampledNorm = sampled ? { lat: sampled.lat, lon: sampled.lon } : null;
     const t   = nowLocalIso();
+    const resolved = await resolveGpsAndMaybeCheckin({ date, gps: sampledNorm, t, author: s.author });
     const cached = await getCached(date);
     const id  = makeId(t, s.author, cached?.entries || []);
     const entry = {
       id, type: 'note', author: s.author, t,
       content: text,
-      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+      gps: resolved.gps,
     };
     closeNoteForm();
+    if (resolved.mintedCheckin) await commitAdd(date, resolved.mintedCheckin);
     await commitAdd(date, entry);
   } else if (c.kind === 'edit-note') {
     const entryId = c.entryId;
@@ -224,16 +255,19 @@ async function submitNote() {
     await commitEditAppendment(date, parentId, appId, { content: text });
   } else if (c.kind === 'append-note') {
     const { parentId } = c;
-    const gps = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const sampled = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
+    const sampledNorm = sampled ? { lat: sampled.lat, lon: sampled.lon } : null;
     const t   = nowLocalIso();
+    const resolved = await resolveGpsAndMaybeCheckin({ date, gps: sampledNorm, t, author: s.author });
     const cached = await getCached(date);
     const id  = makeId(t, s.author, cached?.entries || []);
     const appendment = {
       id, author: s.author, t,
       content: text,
-      gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
+      gps: resolved.gps,
     };
     closeNoteForm();
+    if (resolved.mintedCheckin) await commitAdd(date, resolved.mintedCheckin);
     await commitAddAppendment(date, parentId, appendment);
   }
 }
@@ -272,21 +306,18 @@ async function onPhotoSelected(e) {
   prev.src = prev._url;
   prev.hidden = false;
 
+  // Stash the raw sample on s.composing. The trust check + auto-checkin
+  // mint happens at submit time (submitPhoto), so a cancelled add never
+  // mints a phantom check-in.
   const sampled = await geoloc.sample({ timeout: 5000, maximumAge: 60000 });
   const sampledNorm = sampled ? { lat: sampled.lat, lon: sampled.lon } : null;
-  const trust = await trustGpsForDay(s.viewedDate, sampledNorm);
   if (s.composing?.kind === 'add-photo' || s.composing?.kind === 'append-photo') {
-    s.composing.gps = trust.gps;
+    s.composing.gps = sampledNorm;
   }
   const meta = $('photo-preview-meta');
-  let gpsLine;
-  if (trust.gps) {
-    gpsLine = `${trust.gps.lat.toFixed(5)}, ${trust.gps.lon.toFixed(5)}`;
-  } else if (sampledNorm && trust.distanceKm !== null) {
-    gpsLine = `GPS suppressed (${trust.distanceKm.toFixed(1)} km from nearest check-in)`;
-  } else {
-    gpsLine = 'GPS unavailable';
-  }
+  const gpsLine = sampledNorm
+    ? `${sampledNorm.lat.toFixed(5)}, ${sampledNorm.lon.toFixed(5)}`
+    : 'GPS unavailable';
   meta.textContent = `${file.name || '(unnamed)'} · ${gpsLine}`;
   meta.hidden = false;
 
@@ -327,14 +358,16 @@ async function submitPhoto() {
     const hms  = t.slice(11, 19).replace(/:/g, '');
     const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
     const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    const resolved = await resolveGpsAndMaybeCheckin({ date, gps: gps || null, t, author: s.author });
     const cached = await getCached(date);
     const id   = makeId(t, s.author, cached?.entries || []);
     const entry = {
       id, type: 'photo', author: s.author, t,
       ref, comment,
-      gps: gps || null,
+      gps: resolved.gps,
     };
     closePhotoForm();
+    if (resolved.mintedCheckin) await commitAdd(date, resolved.mintedCheckin);
     await commitAddPhoto(date, entry, file);
   } else if (c.kind === 'edit-photo') {
     const entryId = c.entryId;
@@ -352,14 +385,16 @@ async function submitPhoto() {
     const hms  = t.slice(11, 19).replace(/:/g, '');
     const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
     const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    const resolved = await resolveGpsAndMaybeCheckin({ date, gps: gps || null, t, author: s.author });
     const cached = await getCached(date);
     const id   = makeId(t, s.author, cached?.entries || []);
     const appendment = {
       id, author: s.author, t,
       ref, comment,
-      gps: gps || null,
+      gps: resolved.gps,
     };
     closePhotoForm();
+    if (resolved.mintedCheckin) await commitAdd(date, resolved.mintedCheckin);
     await commitAddAppendmentPhoto(date, parentId, appendment, file);
   }
 }
