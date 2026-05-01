@@ -14,13 +14,37 @@ import * as ops from './services/ops.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 67; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 68; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
-// Visible on every screen for at-a-glance "did the new build land?" debugging.
+// Visible on every screen for at-a-glance "did the new build land?"
+// debugging. Tap it to force a clean reload — unregisters every SW,
+// deletes every cache, hard-reloads. Useful escape hatch when you know
+// a deploy has landed but the SW poll hasn't caught it yet.
 {
   const el = document.getElementById('app-version');
-  if (el) el.textContent = 'v' + VERSION;
+  if (el) {
+    el.textContent = 'v' + VERSION;
+    el.style.cursor = 'pointer';
+    el.title = 'Tap to force-reload from server';
+    el.addEventListener('click', async () => {
+      if (!confirm('Force reload from server?\n\nClears caches and re-fetches every file. Use when you know a new version was just deployed.')) return;
+      el.textContent = 'updating…';
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+      } catch (err) {
+        console.error('[force-reload] cleanup failed:', err);
+      }
+      location.reload();
+    });
+  }
 }
 
 async function init() {
@@ -38,13 +62,15 @@ async function init() {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') reg.update().catch(() => {});
       });
-      // Poll every 60s while the tab is visible — Firefox Android
+      // Poll every 30s while the tab is visible — Firefox Android
       // otherwise honours the HTTP cache TTL on sw.js and can sit on a
       // stale build for several minutes after a deploy with no
-      // visibilitychange to trigger an update check.
+      // visibilitychange to trigger an update check. The wall on
+      // perceived latency is GH Pages build + Fastly CDN propagation;
+      // the version stamp's tap-to-force-reload is the escape hatch.
       setInterval(() => {
         if (document.visibilityState === 'visible') reg.update().catch(() => {});
-      }, 60_000);
+      }, 30_000);
     }
   }
   if (navigator.storage?.persist) {
