@@ -34,6 +34,7 @@ import {
   putFile, deleteFile, getBinary,
   GitHubAuthError, GitHubNotFoundError,
 } from '../../services/github.js';
+import { extractMeta } from '../../exif.js';
 import * as logUi from './log-ui.js';
 import * as detail from './detail.js';
 
@@ -595,36 +596,89 @@ async function commitEditAppendment(date, parentId, appId, patch) {
 }
 
 async function commitEditPhoto(date, id, patch, replacedFile) {
+  let mergedPatch = patch;
+  let oldRef = null;
   if (replacedFile) {
     const entry = s.logEntries.find(e => e.id === id);
-    if (entry?.ref) await replaceThumb(date, entry.ref, replacedFile);
+    if (entry) {
+      oldRef = entry.ref || null;
+      const swap = await prepareReplacedSource(date, entry, replacedFile);
+      if (swap.error) { alert(swap.error); return; }
+      mergedPatch = { ...patch, ref: swap.newRef, t: swap.newT, gps: swap.gps };
+    }
   }
-  await commitEdit(date, id, patch);
+  await commitEdit(date, id, mergedPatch);
+  if (oldRef && mergedPatch.ref && oldRef !== mergedPatch.ref) {
+    await cleanupOldThumb(date, oldRef);
+  }
 }
 
 async function commitEditAppendmentPhoto(date, parentId, appId, patch, replacedFile) {
+  let mergedPatch = patch;
+  let oldRef = null;
   if (replacedFile) {
     const parent = s.logEntries.find(e => e.id === parentId);
     const app = parent?.appendments?.find(a => a.id === appId);
-    if (app?.ref) await replaceThumb(date, app.ref, replacedFile);
+    if (app) {
+      oldRef = app.ref || null;
+      const swap = await prepareReplacedSource(date, app, replacedFile);
+      if (swap.error) { alert(swap.error); return; }
+      mergedPatch = { ...patch, ref: swap.newRef, t: swap.newT, gps: swap.gps };
+    }
   }
-  await commitEditAppendment(date, parentId, appId, patch);
+  await commitEditAppendment(date, parentId, appId, mergedPatch);
+  if (oldRef && mergedPatch.ref && oldRef !== mergedPatch.ref) {
+    await cleanupOldThumb(date, oldRef);
+  }
 }
 
-// Replace the thumb at `ref` with the bytes from `file`. Local store is
-// overwritten (storeLocal also invalidates the URL cache so the new image
-// renders immediately). For the remote PUT we deliberately omit sha so
-// github.putFile's retry-on-422 logic refetches the live sha and stomps —
-// that's the "last-write-wins" behaviour we want for thumb replacement.
-async function replaceThumb(date, ref, file) {
+// Cross-date Replace is rejected — moves across days are explicit
+// delete-and-add. EXIF date != entry's day fires the same 409-equivalent on
+// the phone as on the laptop.
+async function prepareReplacedSource(date, entry, file) {
+  const meta = await extractMeta(file);
+  const noExif = !meta.t;
+  if (meta.date && meta.date !== date) {
+    return { error: `Source EXIF date ${meta.date} doesn't match this day's ${date}.` };
+  }
+
+  const newT = meta.t || nowLocalIso();
+  const author = entry.author || s.author;
+  const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase();
+  const newRef = composeRef({ date, author, t: newT, sourceFilename: file.name || '', noExif, ext });
+
   const blob = await generateFromFile(file);
-  await storeLocal(ref, blob);
+  await storeLocal(newRef, blob);
   try {
-    const { sha } = await putFile(`days/${date}/thumbs/${ref}`, blob, `Replace thumbnail ${ref}`);
-    if (sha) await setLocalSha(ref, sha);
+    const { sha } = await putFile(`days/${date}/thumbs/${newRef}`, blob, `Replace thumbnail → ${newRef}`);
+    if (sha) await setLocalSha(newRef, sha);
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
-    await ops.enqueue({ kind: 'put-thumb', date, args: { ref } });
+    await ops.enqueue({ kind: 'put-thumb', date, args: { ref: newRef } });
+  }
+
+  return { newRef, newT, gps: meta.gps || null };
+}
+
+function composeRef({ date, author, t, sourceFilename, noExif, ext }) {
+  if (!noExif && t) {
+    const hms = t.slice(11, 19).replace(/:/g, '');
+    return `${date}_${hms}_${author}.${ext}`;
+  }
+  // No-EXIF fallback: sanitized source basename. Keeps the date prefix so the
+  // ref still sorts and reads naturally alongside EXIF-derived refs.
+  const stem = (sourceFilename.replace(/\.[^.]*$/, '') || 'photo')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'photo';
+  return `${date}_${stem}_${author}.${ext}`;
+}
+
+async function cleanupOldThumb(date, oldRef) {
+  await deleteLocal(oldRef);
+  try {
+    await deleteFile(`days/${date}/thumbs/${oldRef}`, `Remove old thumbnail ${oldRef}`);
+  } catch (e) {
+    if (e instanceof GitHubAuthError) throw e;
+    await ops.enqueue({ kind: 'delete-thumb', date, args: { ref: oldRef } });
   }
 }
 
