@@ -21,6 +21,7 @@ import {
   GitHubAuthError, GitHubConflictError, GitHubNotFoundError,
 } from './github.js';
 import { getLocalBlob, setLocalSha } from './thumbs.js';
+import { daysPath } from './trip-context.js';
 
 const DB_NAME = 'tv-ops';
 const STORE   = 'queue';
@@ -174,15 +175,15 @@ async function dispatch(op) {
       // Local thumb evicted before flush — the remote will rebuild from
       // tomorrow's restore-from-repo; treat as nothing-to-do.
       if (!blob) return;
-      const { sha } = await putFile(`days/${date}/thumbs/${args.ref}`, blob, `Add thumbnail ${args.ref}`);
+      const { sha } = await putFile(daysPath(`${date}/thumbs/${args.ref}`), blob, `Add thumbnail ${args.ref}`);
       if (sha) await setLocalSha(args.ref, sha);
       return;
     }
     case 'delete-thumb': {
       let sha;
-      try { ({ sha } = await getFile(`days/${date}/thumbs/${args.ref}`)); }
+      try { ({ sha } = await getFile(daysPath(`${date}/thumbs/${args.ref}`))); }
       catch (e) { if (e instanceof GitHubNotFoundError) return; throw e; }
-      return deleteFile(`days/${date}/thumbs/${args.ref}`, sha, `Delete thumbnail ${args.ref}`);
+      return deleteFile(daysPath(`${date}/thumbs/${args.ref}`), sha, `Delete thumbnail ${args.ref}`);
     }
     default:
       throw new Error(`Unknown op kind: ${kind}`);

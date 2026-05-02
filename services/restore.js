@@ -14,10 +14,13 @@ import {
 } from './github.js';
 import { putCached } from './timeline.js';
 import { storeLocal } from './thumbs.js';
+import { daysPath, getActiveSlug } from './trip-context.js';
 
 async function listDates() {
   try {
-    const items = await listDir('days');
+    // Lists the dates in the *active trip*'s days/ folder. Switching trips
+    // requires a re-restore — that's intentional, see /vault/pipeline/TRIP-MANAGEMENT-PLAN.md.
+    const items = await listDir(`${getActiveSlug()}/days`);
     return items
       .filter(i => i.type === 'dir' && /^\d{4}-\d{2}-\d{2}$/.test(i.name))
       .map(i => i.name)
@@ -56,7 +59,7 @@ export async function restoreFromRepo(onProgress = () => {}) {
     let dayEntries;
     let sha;
     try {
-      const fetched = await getFile(`days/${date}/timeline.json`);
+      const fetched = await getFile(daysPath(`${date}/timeline.json`));
       sha = fetched.sha;
       try { dayEntries = JSON.parse(fetched.content); } catch { dayEntries = []; }
       if (!Array.isArray(dayEntries)) dayEntries = [];
@@ -73,7 +76,7 @@ export async function restoreFromRepo(onProgress = () => {}) {
 
     for (const ref of refsIn(dayEntries)) {
       try {
-        const { blob, sha } = await getBinary(`days/${date}/thumbs/${ref}`, 'image/jpeg');
+        const { blob, sha } = await getBinary(daysPath(`${date}/thumbs/${ref}`), 'image/jpeg');
         await storeLocal(ref, blob, sha);
         thumbs++;
         onProgress({ phase: 'thumb', date, entries, thumbs });

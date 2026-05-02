@@ -4,6 +4,7 @@ import { putFile, GitHubAuthError } from '../../services/github.js';
 import * as queue from '../../services/queue.js';
 import * as geoloc from '../../services/location.js';
 import * as settingsUi from '../../settings/settings-ui.js';
+import { wikiPath } from '../../services/trip-context.js';
 
 export function initCaptureUi() {
   $('wiki-capture-btn').addEventListener('click', openCaptureSheet);
@@ -41,7 +42,7 @@ export async function saveRawCapture() {
   const hh = pad(now.getHours()), mm = pad(now.getMinutes()), ss = pad(now.getSeconds());
   const datetime = `${datePart} ${hh}:${mm}`;
   const filename = `${datePart}_${hh}-${mm}-${ss}_raw.md`;
-  const path = `wiki/raw/${filename}`;
+  const path = wikiPath(`raw/${filename}`);
 
   const geoLine = gps ? `\ngeo: ${gps.lat.toFixed(6)},${gps.lon.toFixed(6)}` : '';
   const content = `# Raw capture — ${datetime}\n\n${text.trim()}\n\n---\ncaptured: ${datetime}${geoLine}\n`;

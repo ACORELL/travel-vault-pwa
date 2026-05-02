@@ -7,6 +7,7 @@ import { GITHUB_PAT, GITHUB_REPO, AUTHOR } from '../services/settings.js';
 import { getFile, GitHubAuthError, GitHubNotFoundError } from '../services/github.js';
 import * as queue from '../services/queue.js';
 import { restoreFromRepo } from '../services/restore.js';
+import * as tripCtx from '../services/trip-context.js';
 
 let _opened = false;
 
@@ -30,6 +31,26 @@ function populateInputs() {
   $('settings-pat').value    = settings.get(GITHUB_PAT)  || '';
   $('settings-repo').value   = settings.get(GITHUB_REPO) || '';
   $('settings-author').value = settings.get(AUTHOR)      || '';
+  populateTripSelect();
+}
+
+async function populateTripSelect() {
+  const sel = $('settings-trip');
+  if (!sel) return;
+  const active = tripCtx.getActiveSlug();
+  // Render an immediate single-option fallback so the active slug is at least
+  // visible if the data-repo round-trip is slow / offline.
+  sel.innerHTML = `<option value="${active}">${active}</option>`;
+  try {
+    const trips = await tripCtx.trips();
+    if (!trips.length) return;
+    sel.innerHTML = trips.map(t => {
+      const label = `${t.name || t.slug}${t.archived ? ' (archived)' : ''}`;
+      return `<option value="${t.slug}"${t.slug === active ? ' selected' : ''}>${label}</option>`;
+    }).join('');
+  } catch (err) {
+    console.error('[settings-ui] trip list fetch failed:', err.message);
+  }
 }
 
 function setStatus(msg, kind) {
@@ -44,13 +65,19 @@ function saveInputs() {
   settings.set(GITHUB_REPO, $('settings-repo').value.trim());
   const author = $('settings-author').value.trim().toUpperCase();
   if (author === 'N' || author === 'A') settings.set(AUTHOR, author);
+  // Trip selector — switch active slug if it changed. setActiveSlug emits
+  // 'trip-changed' which downstream listeners can use to clear caches.
+  const sel = $('settings-trip');
+  if (sel && sel.value && sel.value !== tripCtx.getActiveSlug()) {
+    tripCtx.setActiveSlug(sel.value);
+  }
 }
 
 async function testConnection() {
   saveInputs();
   setStatus('Testing…', '');
   try {
-    await getFile('trip.md');
+    await getFile(tripCtx.tripMdPath());
     setStatus('Connected ✓', 'ok');
     window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
     window.dispatchEvent(new CustomEvent('try-flush'));
@@ -59,8 +86,10 @@ async function testConnection() {
       setStatus('Auth failed — check PAT and repo', 'error');
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'offline' }));
     } else if (e instanceof GitHubNotFoundError) {
-      // Auth succeeded — repo is reachable; trip.md just isn't there.
-      setStatus('Connected, but trip.md not found in repo', 'error');
+      // Auth succeeded — repo is reachable; the active trip's trip.md just
+      // isn't there. Common when a fresh trip slug was selected before the
+      // listener pushed it.
+      setStatus(`Connected, but ${tripCtx.tripMdPath()} not found in repo`, 'error');
       window.dispatchEvent(new CustomEvent('sync-status', { detail: 'synced' }));
       window.dispatchEvent(new CustomEvent('try-flush'));
     } else {

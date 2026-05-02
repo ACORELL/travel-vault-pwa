@@ -34,6 +34,7 @@ import {
   putFile, deleteFile, getBinary,
   GitHubAuthError, GitHubNotFoundError,
 } from '../../services/github.js';
+import { daysPath } from '../../services/trip-context.js';
 import { extractMeta } from '../../exif.js';
 import * as logUi from './log-ui.js';
 import * as detail from './detail.js';
@@ -612,7 +613,7 @@ async function commitAddPhoto(date, entry, file) {
   // ship before its thumb does.
   let thumbDirect = false;
   try {
-    const { sha } = await putFile(`days/${date}/thumbs/${entry.ref}`, blob,
+    const { sha } = await putFile(daysPath(`${date}/thumbs/${entry.ref}`), blob,
                                   `Add thumbnail ${entry.ref}`);
     if (sha) await setLocalSha(entry.ref, sha);
     thumbDirect = true;
@@ -664,7 +665,7 @@ async function commitAddAppendmentPhoto(date, parentId, appendment, file) {
 
   let thumbDirect = false;
   try {
-    const { sha } = await putFile(`days/${date}/thumbs/${appendment.ref}`, blob,
+    const { sha } = await putFile(daysPath(`${date}/thumbs/${appendment.ref}`), blob,
                                   `Add thumbnail ${appendment.ref}`);
     if (sha) await setLocalSha(appendment.ref, sha);
     thumbDirect = true;
@@ -780,7 +781,7 @@ async function prepareReplacedSource(date, entry, file) {
   const blob = await generateFromFile(file);
   await storeLocal(newRef, blob);
   try {
-    const { sha } = await putFile(`days/${date}/thumbs/${newRef}`, blob, `Replace thumbnail → ${newRef}`);
+    const { sha } = await putFile(daysPath(`${date}/thumbs/${newRef}`), blob, `Replace thumbnail → ${newRef}`);
     if (sha) await setLocalSha(newRef, sha);
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
@@ -805,7 +806,7 @@ function composeRef({ date, author, t, sourceFilename, noExif, ext }) {
 async function cleanupOldThumb(date, oldRef) {
   await deleteLocal(oldRef);
   try {
-    await deleteFile(`days/${date}/thumbs/${oldRef}`, `Remove old thumbnail ${oldRef}`);
+    await deleteFile(daysPath(`${date}/thumbs/${oldRef}`), `Remove old thumbnail ${oldRef}`);
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
     await ops.enqueue({ kind: 'delete-thumb', date, args: { ref: oldRef } });
@@ -881,8 +882,8 @@ async function cleanupThumbs(date, refs) {
   for (const ref of refs) {
     deleteLocal(ref).catch(() => {});
     try {
-      const { sha } = await getBinary(`days/${date}/thumbs/${ref}`, 'image/jpeg');
-      await deleteFile(`days/${date}/thumbs/${ref}`, sha, `Delete thumbnail ${ref}`);
+      const { sha } = await getBinary(daysPath(`${date}/thumbs/${ref}`), 'image/jpeg');
+      await deleteFile(daysPath(`${date}/thumbs/${ref}`), sha, `Delete thumbnail ${ref}`);
     } catch (e) {
       if (e instanceof GitHubAuthError) return;
       if (e instanceof GitHubNotFoundError) continue;

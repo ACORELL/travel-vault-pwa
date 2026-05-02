@@ -3,6 +3,7 @@
 // the rest of the PWA already consumes, so no downstream rendering changes.
 
 import { listDir, getFile, GitHubNotFoundError } from './github.js';
+import { wikiPath } from './trip-context.js';
 
 const FOLDERS = {
   hotels:      'hotel',
@@ -19,7 +20,7 @@ export async function loadWikiPages() {
     Object.entries(FOLDERS).map(async ([folder, type]) => {
       let entries;
       try {
-        entries = await listDir(`wiki/${folder}`);
+        entries = await listDir(wikiPath(folder));
       } catch (e) {
         if (e instanceof GitHubNotFoundError) return [];
         throw e;

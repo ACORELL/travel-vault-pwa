@@ -28,13 +28,14 @@ import {
 } from './timeline.js';
 import * as ops from './ops.js';
 import { storeLocal, getLocalSha } from './thumbs.js';
+import { daysPath } from './trip-context.js';
 
 const THROTTLE_MS = 10_000;
 
 const _lastFetched = new Map();
 
 function pathFor(date) {
-  return `days/${date}/timeline.json`;
+  return daysPath(`${date}/timeline.json`);
 }
 
 function byT(a, b) {
@@ -189,7 +190,7 @@ async function syncThumbs(date, entries) {
 
   let remote;
   try {
-    remote = await listDir(`days/${date}/thumbs`);
+    remote = await listDir(daysPath(`${date}/thumbs`));
   } catch (e) {
     if (e instanceof GitHubAuthError) throw e;
     if (e instanceof GitHubNotFoundError) return;
@@ -202,7 +203,7 @@ async function syncThumbs(date, entries) {
     const localSha = await getLocalSha(item.name);
     if (localSha === item.sha) continue;
     try {
-      const { blob } = await getBinary(`days/${date}/thumbs/${item.name}`, 'image/jpeg');
+      const { blob } = await getBinary(daysPath(`${date}/thumbs/${item.name}`), 'image/jpeg');
       await storeLocal(item.name, blob, item.sha);
       changed = true;
     } catch (e) {
