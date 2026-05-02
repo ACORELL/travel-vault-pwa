@@ -62,6 +62,19 @@ function itemState(p) {
     return 'spent';
   }
 
+  if (p.type === 'restaurant') {
+    const t = p.reservation_time;
+    if (!t) return 'upcoming';
+    const [h, m] = t.split(':').map(Number);
+    // Two-hour window after reservation_time before the booking is "spent" —
+    // covers a normal sit-down. No duration field on restaurants today, so
+    // the heuristic is good enough until reservations gain one.
+    const startMins = h * 60 + m;
+    if (nowMins < startMins) return 'upcoming';
+    if (nowMins < startMins + 120) return 'active';
+    return 'spent';
+  }
+
   if (p.type === 'hotel') {
     const isCheckInDay  = p.check_in_date  === TODAY;
     const isCheckOutDay = p.check_out_date === TODAY;
@@ -145,6 +158,11 @@ function formatTodayLine(p) {
     if (p.reservation_time) parts.push(esc(p.reservation_time));
     return parts.join(' · ');
   }
+  if (p.type === 'restaurant') {
+    const parts = [`🍽️ ${esc(p.name)}`];
+    if (p.reservation_time) parts.push(esc(p.reservation_time));
+    return parts.join(' · ');
+  }
   return esc(p.name);
 }
 
@@ -168,6 +186,9 @@ function formatTomorrowLine(p) {
     const endStr = activityEndTimeStr(p);
     if (endStr) parts.push(`Ending at ${endStr}`);
     return parts.join(' · ');
+  }
+  if (p.type === 'restaurant') {
+    return `🍽️ ${esc(p.name)} · ${esc(p.reservation_time || '—')}`;
   }
   return esc(p.name);
 }
@@ -336,14 +357,15 @@ function buildFoldHtml(p, idx) {
   return rows.join('');
 }
 
-const STRIP_CATEGORY_ORDER = ['transport', 'hotel', 'activity'];
-const STRIP_CATEGORY_LABEL = { transport: 'Flights', hotel: 'Hotels', activity: 'Activities' };
-const STRIP_CATEGORY_CLASS = { hotel: 'today-item-hotel', transport: 'today-item-transport', activity: 'today-item-activity' };
+const STRIP_CATEGORY_ORDER = ['transport', 'hotel', 'activity', 'restaurant'];
+const STRIP_CATEGORY_LABEL = { transport: 'Flights', hotel: 'Hotels', activity: 'Activities', restaurant: 'Restaurants' };
+const STRIP_CATEGORY_CLASS = { hotel: 'today-item-hotel', transport: 'today-item-transport', activity: 'today-item-activity', restaurant: 'today-item-restaurant' };
 
 function primaryTime(p) {
-  if (p.type === 'hotel')     return p.check_in_time    || '00:00';
-  if (p.type === 'transport') return p.departure_time   || '00:00';
-  if (p.type === 'activity')  return p.reservation_time || '00:00';
+  if (p.type === 'hotel')      return p.check_in_time    || '00:00';
+  if (p.type === 'transport')  return p.departure_time   || '00:00';
+  if (p.type === 'activity')   return p.reservation_time || '00:00';
+  if (p.type === 'restaurant') return p.reservation_time || '00:00';
   return '00:00';
 }
 
@@ -379,6 +401,7 @@ export function renderTodayStrip() {
     }
     if (p.type === 'transport' && p.date) return p.date === date;
     if (p.type === 'activity' && p.reservation_date) return p.reservation_date === date;
+    if (p.type === 'restaurant' && p.reservation_date) return p.reservation_date === date;
     return false;
   }
 
