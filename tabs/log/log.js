@@ -938,6 +938,8 @@ async function navigateDay(dir) {
   const newIdx = idx + dir;
   if (newIdx < 0 || newIdx >= s.availableDays.length) return;
   s.viewedDate = s.availableDays[newIdx];
+  // Listeners (e.g. trip header's "Day X of Y") use this to re-render.
+  window.dispatchEvent(new CustomEvent('viewed-day-changed', { detail: { date: s.viewedDate } }));
   await loadLog();
   // Background refresh for the just-navigated date so cross-device updates
   // surface without requiring a manual tap on Refresh.

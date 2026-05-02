@@ -36,14 +36,18 @@
     #app.hidden { display: none; }
 
     header {
-      height: calc(var(--hdr) + env(safe-area-inset-top));
-      padding: env(safe-area-inset-top) 16px 0;
+      height: auto; min-height: calc(var(--hdr) + env(safe-area-inset-top));
+      padding: env(safe-area-inset-top) 16px 8px;
       background: #1a1a1a; color: #fff;
       display: flex; align-items: flex-end; justify-content: space-between;
-      padding-bottom: 10px;
       flex-shrink: 0;
     }
+    .hdr-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    #header-trip-name { font-size: 14px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #header-trip-sub { font-size: 11px; letter-spacing: .04em; opacity: .65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #header-trip-sub:empty { display: none; }
     #date-label { font-size: 13px; letter-spacing: .04em; opacity: .7; }
+    #date-label:empty { display: none; }
     #author-label { font-size: 13px; font-weight: 600; }
     .sync-dot { width: 9px; height: 9px; border-radius: 50%; margin-left: 8px; flex-shrink: 0; transition: background .3s; }
     .sync-dot.synced  { background: #4ade80; }
@@ -347,7 +351,11 @@
 <div id="app" class="hidden">
 
   <header>
-    <span id="date-label"></span>
+    <div class="hdr-left">
+      <span id="header-trip-name"></span>
+      <span id="header-trip-sub"></span>
+      <span id="date-label"></span>
+    </div>
     <div class="hdr-right">
       <span id="author-label"></span>
       <span class="sync-dot offline" id="sync-dot" title="offline"></span>
@@ -358,6 +366,7 @@
   <main>
     <!-- Log tab -->
     <div id="tab-log" class="tab-panel active">
+      <div id="today-strip"></div>
       <div class="day-nav">
         <button id="day-prev" class="day-nav-btn" disabled>‹</button>
         <span id="day-nav-label">Today</span>
@@ -391,7 +400,6 @@
         </button>
         <button id="wiki-capture-btn" class="wiki-cap-btn" title="Quick raw capture">+</button>
       </div>
-      <div id="today-strip"></div>
       <input id="wiki-search" class="wiki-search" type="text" placeholder="Search...">
       <div id="wiki-list"></div>
     </div>

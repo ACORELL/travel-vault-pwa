@@ -67,3 +67,12 @@ export async function trips({ force = false } = {}) {
     return [];
   }
 }
+
+// Synchronous active-trip lookup against the in-memory cache. Returns null
+// if trips() has never run (caller should await trips() once on boot before
+// relying on this).
+export function getActiveTripCached() {
+  if (!_tripsCache) return null;
+  const slug = getActiveSlug();
+  return _tripsCache.items.find(t => t.slug === slug) || null;
+}

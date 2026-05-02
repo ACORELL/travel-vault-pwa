@@ -5,6 +5,7 @@ import * as settings from './services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from './services/settings.js';
 import { $, $$, show, hide, fmtDate, setSyncStatus } from './core/ui.js';
 import { s, TODAY } from './core/state.js';
+import * as tripCtx from './services/trip-context.js';
 import * as wikiUi from './tabs/wiki/wiki-ui.js';
 import * as todayStrip from './tabs/wiki/today-strip.js';
 import * as captureUi from './tabs/capture/capture-ui.js';
@@ -14,7 +15,7 @@ import * as ops from './services/ops.js';
 import { setupTabs } from './core/router.js';
 
 // ---- Boot ----
-const VERSION = 69; // bump in lockstep with sw.js CACHE on every push
+const VERSION = 70; // bump in lockstep with sw.js CACHE on every push
 
 // Stamp the version into the bottom-right of the app shell at module load.
 // Visible on every screen for at-a-glance "did the new build land?"
@@ -131,7 +132,6 @@ async function resetApp() {
 }
 
 async function startApp() {
-  $('date-label').textContent   = fmtDate(TODAY);
   $('author-label').textContent = s.author;
 
   setupTabs();
@@ -141,6 +141,14 @@ async function startApp() {
   maybeAddTestStripButton();
   settingsUi.init();
 
+  // Trip header — render asap with whatever's local, then refine after
+  // _trips.json fetch so name/dates land on first paint where possible.
+  renderTripHeader();
+  tripCtx.trips().then(renderTripHeader).catch(() => {});
+  window.addEventListener('trip-changed', () => { renderTripHeader(); });
+  // Day nav changes which day "Day X of Y" reflects — re-render on switch.
+  window.addEventListener('viewed-day-changed', () => renderTripHeader());
+
   await logTab.loadAvailableDays();
   await logTab.loadLog();
   await loadWiki();
@@ -149,6 +157,49 @@ async function startApp() {
     setSyncStatus(navigator.onLine ? 'synced' : 'offline');
     tryFlush();
   }
+}
+
+// ── Trip header ────────────────────────────────────────────────────────────
+// Top line: trip name. Sub-line: date range + "Day X of Y" when the viewed
+// date sits inside the range. Falls back to today's weekday when no trip
+// dates are set, so the header never goes empty.
+function renderTripHeader() {
+  const trip = tripCtx.getActiveTripCached();
+  const nameEl = $('header-trip-name');
+  const subEl = $('header-trip-sub');
+  const dateEl = $('date-label');
+  if (!nameEl) return;
+  nameEl.textContent = trip?.name || tripCtx.getActiveSlug() || '';
+  const sub = buildTripSubLine(trip, s.viewedDate || TODAY);
+  subEl.textContent = sub;
+  // Fall back to weekday/date if the sub-line is empty (no trip dates set).
+  dateEl.textContent = sub ? '' : fmtDate(TODAY);
+}
+
+function buildTripSubLine(trip, viewedDate) {
+  if (!trip) return '';
+  const start = trip.start_date;
+  const end = trip.end_date;
+  if (!start && !end) return '';
+  const range = (start && end) ? `${fmtShort(start)}–${fmtShort(end)}` : (start ? `from ${fmtShort(start)}` : `until ${fmtShort(end)}`);
+  if (start && end && viewedDate >= start && viewedDate <= end) {
+    const dayN = daysBetween(start, viewedDate) + 1;
+    const totalN = daysBetween(start, end) + 1;
+    return `${range} · Day ${dayN} of ${totalN}`;
+  }
+  return range;
+}
+
+function fmtShort(iso) {
+  // "2026-06-05" → "Jun 5"
+  const d = new Date(iso + 'T12:00:00');
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function daysBetween(a, b) {
+  const ms = new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00');
+  return Math.round(ms / 86400000);
 }
 
 // Settings' Test connection emits this event so the dot reflects reality.
