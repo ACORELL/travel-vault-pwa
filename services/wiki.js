@@ -37,7 +37,23 @@ export async function loadWikiPages() {
       return pages.filter(Boolean);
     })
   );
-  return folderResults.flat();
+  const pages = folderResults.flat();
+
+  // Resolve each page's area_path leaf to a display name once (using the
+  // area pages' own `name` field, falling back to a title-cased slug). The
+  // wiki list and article cards read page.area_display directly so they
+  // don't need to re-derive on every render.
+  const areaNameBySlug = new Map();
+  for (const p of pages) if (p.type === 'area') areaNameBySlug.set(p.slug, p.name);
+  for (const p of pages) {
+    const leaf = Array.isArray(p.area_path) && p.area_path.length ? p.area_path[0] : '';
+    p.area_display = leaf ? (areaNameBySlug.get(leaf) || titleCaseSlug(leaf)) : '';
+  }
+  return pages;
+}
+
+function titleCaseSlug(slug) {
+  return slug.split('-').map(w => w ? w[0].toUpperCase() + w.slice(1) : '').join(' ');
 }
 
 function parseFrontmatter(yamlText) {
@@ -94,6 +110,7 @@ function parsePage(text, type, slug) {
     type, slug,
     name:   fm.name || slug,
     area:   fm.area || '',
+    area_path: Array.isArray(fm.area_path) ? fm.area_path : [],
     rating: fm.rating_personal || null,
     tags,
     content: m[2].trim(),

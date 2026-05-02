@@ -16,7 +16,7 @@ export function renderWikiList(query) {
   const pages = query
     ? s.wikiPages.filter(p =>
         p.name.toLowerCase().includes(query) ||
-        p.area.toLowerCase().includes(query) ||
+        (p.area_display || '').toLowerCase().includes(query) ||
         p.tags.some(t => t.toLowerCase().includes(query)))
     : s.wikiPages;
 
@@ -39,7 +39,7 @@ export function renderWikiList(query) {
             `<div class="wiki-item" data-slug="${esc(p.slug)}" data-type="${esc(p.type)}">` +
               `<div>` +
                 `<div class="wiki-name">${esc(p.name)}</div>` +
-                (p.area ? `<div class="wiki-area">${esc(p.area)}</div>` : '') +
+                (p.area_display ? `<div class="wiki-area">${esc(p.area_display)}</div>` : '') +
               `</div>` +
               (p.rating ? `<span class="wiki-rating">${'★'.repeat(+p.rating)}</span>` : '') +
             `</div>`
@@ -194,7 +194,7 @@ function detailsRowsForRestaurant(page) {
     rows.push(row('Reservation', [page.reservation_date ? fmtDate(page.reservation_date) : null, page.reservation_time].filter(Boolean).join(' · ')));
   }
   if (page.subtype) rows.push(row('Cuisine', page.subtype));
-  if (page.area) rows.push(row('Area', page.area));
+  if (page.area_display) rows.push(row('Area', page.area_display));
   if (page.address) rows.push(row('Address', page.address));
   return rows;
 }
@@ -207,7 +207,7 @@ function detailsRowsForActivity(page) {
   if (page.duration) rows.push(row('Duration', page.duration));
   if (page.meeting_point) rows.push(row('Meeting point', page.meeting_point));
   if (page.subtype) rows.push(row('Type', page.subtype));
-  if (page.area) rows.push(row('Area', page.area));
+  if (page.area_display) rows.push(row('Area', page.area_display));
   if (page.address) rows.push(row('Address', page.address));
   return rows;
 }
