@@ -52,6 +52,7 @@ export function setupWikiTab() {
     userPicked = true;
     saveOverride(getActiveSlug(), selectedSlug, gpsResult);
     renderWikiList((search?.value || '').toLowerCase().trim());
+    renderAreaPanel();
   });
   $('article-back').addEventListener('click', () => $('wiki-article').classList.remove('open'));
 }
@@ -104,6 +105,7 @@ export function rebuildAreaSet() {
   // the GPS-nearest area on the next call.
   resolveOverrideOrReset();
   populateAreaSelect();
+  renderAreaPanel();
 }
 
 // Day-rollover revert + override-still-applies check. GPS-shift revert is
@@ -172,7 +174,94 @@ export async function applyNearMe() {
     selectedSlug = slug;
     populateAreaSelect();
     renderWikiList('');
+    renderAreaPanel();
   }
+}
+
+// ── Area intro panel ──────────────────────────────────────────────────────
+//
+// Sits between the cap-row and the area dropdown. Visible only when the
+// active filter is an area that has its own wiki/areas/<slug>.md page;
+// collapsed by default, tap to expand. Shows the five "panel sections" from
+// the area schema; empty sections are skipped.
+
+const PANEL_SECTIONS = [
+  { key: 'food_and_drink',        label: 'Food & drink' },
+  { key: 'sights_and_doing',      label: 'Sights & doing' },
+  { key: 'local_rhythms',         label: 'Local rhythms' },
+  { key: 'customs_and_etiquette', label: 'Customs & etiquette' },
+  { key: 'getting_around',        label: 'Getting around' },
+];
+
+let panelOpen = false;
+
+function renderAreaPanel() {
+  const el = $('wiki-area-panel');
+  if (!el) return;
+  // Source from the already-loaded s.wikiPages; if the active slug doesn't
+  // have a type=area page, hide the panel entirely.
+  const page = (s.wikiPages || []).find(p => p.type === 'area' && p.slug === selectedSlug);
+  if (!selectedSlug || !page) { el.hidden = true; el.innerHTML = ''; return; }
+
+  const sections = extractSections(page.content || '', PANEL_SECTIONS.map(s => s.key));
+  const filledSections = PANEL_SECTIONS.filter(s => sections[s.key] && sections[s.key].trim());
+  const sectionsHtml = filledSections.length
+    ? filledSections.map(s => `
+        <div class="wiki-area-panel-section">
+          <div class="wiki-area-panel-section-title">${esc(s.label)}</div>
+          ${renderPanelSection(sections[s.key])}
+        </div>
+      `).join('')
+    : '<div class="wiki-area-panel-empty">No intro yet — open the area page on the laptop and run “Find more”.</div>';
+
+  el.hidden = false;
+  el.classList.toggle('open', panelOpen);
+  el.innerHTML =
+    `<button type="button" class="wiki-area-panel-bar" aria-expanded="${panelOpen}">` +
+      `<span><span class="wiki-area-panel-icon">📍</span> ${esc(page.name)}</span>` +
+      `<span class="wiki-area-panel-arrow">›</span>` +
+    `</button>` +
+    `<div class="wiki-area-panel-body">${sectionsHtml}</div>`;
+  el.querySelector('.wiki-area-panel-bar').addEventListener('click', () => {
+    panelOpen = !panelOpen;
+    el.classList.toggle('open', panelOpen);
+    el.querySelector('.wiki-area-panel-bar').setAttribute('aria-expanded', String(panelOpen));
+  });
+}
+
+function extractSections(body, keys) {
+  const result = {};
+  if (!body) return result;
+  const chunks = ('\n' + body).split(/\n## /m);
+  for (const chunk of chunks) {
+    const trimmed = chunk.trim();
+    if (!trimmed) continue;
+    const newlineIdx = trimmed.indexOf('\n');
+    const heading = (newlineIdx > -1 ? trimmed.slice(0, newlineIdx) : trimmed).trim();
+    const content = (newlineIdx > -1 ? trimmed.slice(newlineIdx + 1) : '').trim();
+    const key = heading.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    if (keys.includes(key)) result[key] = content;
+  }
+  return result;
+}
+
+function renderPanelSection(content) {
+  const text = content.replace(/\[\d+\]/g, '').trim();
+  if (!text) return '';
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length && lines.every(l => l.startsWith('- '))) {
+    const items = lines.map(l => `<li>${renderInlineMd(l.replace(/^-\s+/, ''))}</li>`).join('');
+    return `<ul>${items}</ul>`;
+  }
+  return text.split(/\n{2,}/).map(p => `<p>${renderInlineMd(p)}</p>`).join('');
+}
+
+function renderInlineMd(text) {
+  let html = esc(text);
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+    (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+  return html;
 }
 
 function populateAreaSelect() {

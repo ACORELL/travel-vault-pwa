@@ -193,6 +193,38 @@
       background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px;
     }
     .wiki-area-select:focus { outline: none; border-color: #1a1a1a; background-color: #fff; }
+    .wiki-area-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 12px; overflow: hidden;
+    }
+    .wiki-area-panel-bar {
+      width: 100%; display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+      background: none; border: none; cursor: pointer; font: inherit;
+      font-size: 14px; font-weight: 600; color: #1a1a1a; text-align: left;
+      min-height: 44px;
+    }
+    .wiki-area-panel-bar:active { background: rgba(0,0,0,0.05); }
+    .wiki-area-panel-bar > span:first-child { flex: 1; }
+    .wiki-area-panel-icon { color: var(--muted); }
+    .wiki-area-panel-arrow {
+      font-size: 14px; color: var(--muted); transition: transform 0.15s;
+    }
+    .wiki-area-panel.open .wiki-area-panel-arrow { transform: rotate(90deg); }
+    .wiki-area-panel-body {
+      display: none; padding: 4px 14px 14px; border-top: 1px solid var(--border);
+      background: #fff;
+    }
+    .wiki-area-panel.open .wiki-area-panel-body { display: block; }
+    .wiki-area-panel-section { margin-top: 12px; }
+    .wiki-area-panel-section:first-child { margin-top: 8px; }
+    .wiki-area-panel-section-title {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;
+    }
+    .wiki-area-panel-section ul { margin: 4px 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+    .wiki-area-panel-section li { margin-bottom: 4px; }
+    .wiki-area-panel-section p { margin: 4px 0; font-size: 14px; line-height: 1.5; }
+    .wiki-area-panel-empty { font-size: 13px; color: var(--muted); padding: 8px 0; }
     .wiki-cap-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
     .wiki-sync-indicator {
       display: inline-flex; align-items: center; gap: 6px;
@@ -408,6 +440,7 @@
         </button>
         <button id="wiki-capture-btn" class="wiki-cap-btn" title="Quick raw capture">+</button>
       </div>
+      <div id="wiki-area-panel" class="wiki-area-panel" hidden></div>
       <select id="wiki-area" class="wiki-area-select" aria-label="Filter by area">
         <option value="">All areas</option>
       </select>
