@@ -4,7 +4,7 @@ import { s } from '../../core/state.js';
 import * as settings from '../../services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from '../../services/settings.js';
 import * as wikiService from '../../services/wiki.js';
-import { renderWikiList, rebuildAreaSet } from './wiki-ui.js';
+import { renderWikiList, rebuildAreaSet, applyNearMe } from './wiki-ui.js';
 import { renderTodayStrip } from './today-strip.js';
 
 const REFRESH_THROTTLE_MS = 30_000;
@@ -47,6 +47,9 @@ export async function loadWiki({ force = false } = {}) {
       renderTodayStrip();
       rebuildAreaSet();
       renderWikiList(document.getElementById('wiki-search')?.value?.toLowerCase()?.trim() || '');
+      // Defer the GPS sample so the wiki list paints first; the prompt then
+      // appears against an already-populated tab rather than a blank one.
+      applyNearMe().catch(err => console.error('[wiki] applyNearMe failed:', err.message));
       setIndicator('synced', `Synced ${fmtTime(lastRefreshAt)}`);
     } catch (err) {
       setIndicator('error', 'Sync failed — tap to retry');

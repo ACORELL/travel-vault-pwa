@@ -2,12 +2,16 @@
 // Today/tomorrow strip lives in today-strip.js.
 import { $, esc, fmtDate } from '../../core/ui.js';
 import { s } from '../../core/state.js';
+import { sample as sampleGps, pickNearestSlug } from '../../services/location.js';
 
 const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas', food: 'Food', guide: 'Guides' };
 const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area', 'food', 'guide'];
 
 let selectedSlug = '';
 let areaSet = [];   // [{ slug, name, area_path, area_path_display, has_page }]
+let userPicked = false;
+let gpsAttempted = false;
+let gpsResult = null;     // last successful GPS sample, or null on denial
 
 export function setupWikiTab() {
   // Legacy search input is hidden in the shell behind [hidden] but still
@@ -17,6 +21,7 @@ export function setupWikiTab() {
   const sel = $('wiki-area');
   if (sel) sel.addEventListener('change', e => {
     selectedSlug = e.target.value || '';
+    userPicked = true;
     renderWikiList((search?.value || '').toLowerCase().trim());
   });
   $('article-back').addEventListener('click', () => $('wiki-article').classList.remove('open'));
@@ -66,6 +71,29 @@ export function rebuildAreaSet() {
   areaSet.sort((a, b) => a.area_path_display.localeCompare(b.area_path_display));
 
   populateAreaSelect();
+}
+
+// "Near me" on phone = nearest area page (by Haversine) to the user's GPS.
+// Sample once per session — browsers persist permission for a while, but the
+// in-app permission prompt UX is jarring to repeat. B.4 will add the
+// >2 km basis-shift / day-rollover re-evaluation.
+export async function applyNearMe() {
+  if (userPicked || selectedSlug) return;
+  if (!gpsAttempted) {
+    gpsAttempted = true;
+    gpsResult = await sampleGps({ timeout: 8000, maximumAge: 5 * 60_000 });
+  }
+  if (!gpsResult) return;
+
+  const candidates = (s.wikiPages || [])
+    .filter(p => p.type === 'area' && typeof p.lat === 'number' && typeof p.lon === 'number')
+    .map(p => ({ slug: p.slug, lat: p.lat, lon: p.lon }));
+  const slug = pickNearestSlug(candidates, gpsResult);
+  if (slug && areaSet.some(a => a.slug === slug)) {
+    selectedSlug = slug;
+    populateAreaSelect();
+    renderWikiList('');
+  }
 }
 
 function populateAreaSelect() {
