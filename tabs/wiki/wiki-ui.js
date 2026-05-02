@@ -6,55 +6,119 @@ import { s } from '../../core/state.js';
 const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas', food: 'Food', guide: 'Guides' };
 const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area', 'food', 'guide'];
 
+let selectedSlug = '';
+let areaSet = [];   // [{ slug, name, area_path, area_path_display, has_page }]
+
 export function setupWikiTab() {
-  $('wiki-search').addEventListener('input', e => renderWikiList(e.target.value.toLowerCase().trim()));
+  // Legacy search input is hidden in the shell behind [hidden] but still
+  // wired so re-surfacing it is a one-line markup change.
+  const search = $('wiki-search');
+  if (search) search.addEventListener('input', e => renderWikiList(e.target.value.toLowerCase().trim()));
+  const sel = $('wiki-area');
+  if (sel) sel.addEventListener('change', e => {
+    selectedSlug = e.target.value || '';
+    renderWikiList((search?.value || '').toLowerCase().trim());
+  });
   $('article-back').addEventListener('click', () => $('wiki-article').classList.remove('open'));
+}
+
+function titleCaseSlug(slug) {
+  return slug.split('-').map(w => w ? w[0].toUpperCase() + w.slice(1) : '').join(' ');
+}
+
+// Builds the area set client-side from the loaded pages: union of every
+// type=area page AND every unique slug discovered in any page's area_path.
+// Mirrors the laptop's /api/wiki/areas server logic so behaviour matches.
+export function rebuildAreaSet() {
+  const areaPageBySlug = new Map();
+  for (const p of s.wikiPages || []) if (p.type === 'area') areaPageBySlug.set(p.slug, p);
+
+  const inferredPath = new Map();
+  for (const p of s.wikiPages || []) {
+    const ap = Array.isArray(p.area_path) ? p.area_path : [];
+    for (let i = 0; i < ap.length; i++) {
+      const slug = ap[i];
+      if (!inferredPath.has(slug)) inferredPath.set(slug, ap.slice(i));
+    }
+  }
+
+  const displayName = (slug) => {
+    const page = areaPageBySlug.get(slug);
+    if (page && page.name) return page.name;
+    return titleCaseSlug(slug);
+  };
+
+  const allSlugs = new Set([...areaPageBySlug.keys(), ...inferredPath.keys()]);
+  areaSet = [];
+  for (const slug of allSlugs) {
+    const page = areaPageBySlug.get(slug);
+    const areaPath = (page && Array.isArray(page.area_path) && page.area_path.length)
+      ? page.area_path
+      : (inferredPath.get(slug) || [slug]);
+    areaSet.push({
+      slug,
+      name: displayName(slug),
+      area_path: areaPath,
+      area_path_display: areaPath.map(displayName).join(' · '),
+      has_page: !!page,
+    });
+  }
+  areaSet.sort((a, b) => a.area_path_display.localeCompare(b.area_path_display));
+
+  populateAreaSelect();
+}
+
+function populateAreaSelect() {
+  const sel = $('wiki-area');
+  if (!sel) return;
+  const current = selectedSlug;
+  sel.innerHTML = '<option value="">All areas</option>' + areaSet.map(a =>
+    `<option value="${esc(a.slug)}">${esc(a.area_path_display)}</option>`
+  ).join('');
+  if (current && areaSet.some(a => a.slug === current)) sel.value = current;
+  else { sel.value = ''; selectedSlug = ''; }
+}
+
+function pageInArea(p, slug) {
+  return Array.isArray(p.area_path) && p.area_path.includes(slug);
+}
+
+function subAreaSlugFor(page, slug) {
+  const ap = page.area_path || [];
+  const idx = ap.indexOf(slug);
+  if (idx <= 0) return null;
+  return ap[idx - 1];
 }
 
 export function renderWikiList(query) {
   const el = $('wiki-list');
-  const pages = query
-    ? s.wikiPages.filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        (p.area_display || '').toLowerCase().includes(query) ||
-        p.tags.some(t => t.toLowerCase().includes(query)))
-    : s.wikiPages;
+  let pages = s.wikiPages || [];
+  if (selectedSlug) pages = pages.filter(p => pageInArea(p, selectedSlug));
+  if (query) {
+    pages = pages.filter(p =>
+      p.name.toLowerCase().includes(query) ||
+      (p.area_display || '').toLowerCase().includes(query) ||
+      p.tags.some(t => t.toLowerCase().includes(query)));
+  }
 
   if (!pages.length) { el.innerHTML = '<p class="empty-state">No pages</p>'; return; }
 
-  const grouped = {};
-  for (const p of pages) { if (!grouped[p.type]) grouped[p.type] = []; grouped[p.type].push(p); }
+  const subAreaSlugs = selectedSlug
+    ? pages.map(p => subAreaSlugFor(p, selectedSlug)).filter(s => s !== null)
+    : [];
+  const groupBySubArea = subAreaSlugs.length > 0;
 
-  el.innerHTML = TYPE_ORDER
-    .filter(type => grouped[type])
-    .map(type => {
-      const items = grouped[type];
-      return `<div class="wiki-accordion-section">` +
-        `<button class="wiki-accordion-header" data-type="${type}">` +
-          `<span>${esc(TYPE_LABEL[type] || type)}</span>` +
-          `<span class="wiki-accordion-arrow">›</span>` +
-        `</button>` +
-        `<div class="wiki-accordion-body">` +
-          items.map(p =>
-            `<div class="wiki-item" data-slug="${esc(p.slug)}" data-type="${esc(p.type)}">` +
-              `<div>` +
-                `<div class="wiki-name">${esc(p.name)}</div>` +
-                (p.area_display ? `<div class="wiki-area">${esc(p.area_display)}</div>` : '') +
-              `</div>` +
-              (p.rating ? `<span class="wiki-rating">${'★'.repeat(+p.rating)}</span>` : '') +
-            `</div>`
-          ).join('') +
-        `</div>` +
-      `</div>`;
-    }).join('');
+  const sectionsHtml = groupBySubArea
+    ? renderBySubArea(pages)
+    : renderByType(pages);
 
-  // When searching, expand all matching sections so results are immediately visible
+  el.innerHTML = sectionsHtml;
+
   if (query) {
     el.querySelectorAll('.wiki-accordion-header').forEach(h => h.classList.add('open'));
     el.querySelectorAll('.wiki-accordion-body').forEach(b => b.classList.add('open'));
   }
 
-  // Accordion toggle — one section open at a time
   el.querySelectorAll('.wiki-accordion-header').forEach(header => {
     header.addEventListener('click', () => {
       const body = header.nextElementSibling;
@@ -72,6 +136,65 @@ export function renderWikiList(query) {
     const page = s.wikiPages.find(p => p.slug === item.dataset.slug && p.type === item.dataset.type);
     if (page) openArticle(page);
   }));
+}
+
+function itemHtml(p) {
+  return `<div class="wiki-item" data-slug="${esc(p.slug)}" data-type="${esc(p.type)}">` +
+    `<div>` +
+      `<div class="wiki-name">${esc(p.name)}</div>` +
+      (p.area_display ? `<div class="wiki-area">${esc(p.area_display)}</div>` : '') +
+    `</div>` +
+    (p.rating ? `<span class="wiki-rating">${'★'.repeat(+p.rating)}</span>` : '') +
+  `</div>`;
+}
+
+function sectionHtml(label, items) {
+  return `<div class="wiki-accordion-section">` +
+    `<button class="wiki-accordion-header">` +
+      `<span>${esc(label)}</span>` +
+      `<span class="wiki-accordion-arrow">›</span>` +
+    `</button>` +
+    `<div class="wiki-accordion-body">${items.map(itemHtml).join('')}</div>` +
+  `</div>`;
+}
+
+function renderByType(pages) {
+  const grouped = {};
+  for (const p of pages) { (grouped[p.type] ||= []).push(p); }
+  for (const t of Object.keys(grouped)) {
+    grouped[t].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return TYPE_ORDER
+    .filter(type => grouped[type])
+    .map(type => sectionHtml(TYPE_LABEL[type] || type, grouped[type]))
+    .join('');
+}
+
+function renderBySubArea(pages) {
+  const nameBySlug = new Map();
+  for (const a of areaSet) nameBySlug.set(a.slug, a.name);
+
+  const grouped = {};
+  for (const p of pages) {
+    const sub = subAreaSlugFor(p, selectedSlug);
+    const key = sub || `__direct__:${selectedSlug}`;
+    (grouped[key] ||= []).push(p);
+  }
+  for (const k of Object.keys(grouped)) {
+    grouped[k].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const directKey = `__direct__:${selectedSlug}`;
+  const subKeys = Object.keys(grouped).filter(k => k !== directKey)
+    .sort((a, b) => (nameBySlug.get(a) || a).localeCompare(nameBySlug.get(b) || b));
+  const ordered = [...subKeys];
+  if (grouped[directKey]) ordered.push(directKey);
+
+  return ordered.map(key => {
+    const label = key === directKey
+      ? `In ${nameBySlug.get(selectedSlug) || selectedSlug}`
+      : (nameBySlug.get(key) || key);
+    return sectionHtml(label, grouped[key]);
+  }).join('');
 }
 
 // Types that get the structured details card up top. Body sections (area /

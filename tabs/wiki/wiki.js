@@ -4,7 +4,7 @@ import { s } from '../../core/state.js';
 import * as settings from '../../services/settings.js';
 import { GITHUB_PAT, GITHUB_REPO } from '../../services/settings.js';
 import * as wikiService from '../../services/wiki.js';
-import { renderWikiList } from './wiki-ui.js';
+import { renderWikiList, rebuildAreaSet } from './wiki-ui.js';
 import { renderTodayStrip } from './today-strip.js';
 
 const REFRESH_THROTTLE_MS = 30_000;
@@ -45,6 +45,7 @@ export async function loadWiki({ force = false } = {}) {
       s.wikiPages = await wikiService.loadWikiPages();
       lastRefreshAt = Date.now();
       renderTodayStrip();
+      rebuildAreaSet();
       renderWikiList(document.getElementById('wiki-search')?.value?.toLowerCase()?.trim() || '');
       setIndicator('synced', `Synced ${fmtTime(lastRefreshAt)}`);
     } catch (err) {
