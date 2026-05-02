@@ -2,7 +2,8 @@
 // Today/tomorrow strip lives in today-strip.js.
 import { $, esc, fmtDate } from '../../core/ui.js';
 import { s } from '../../core/state.js';
-import { sample as sampleGps, pickNearestSlug } from '../../services/location.js';
+import { sample as sampleGps, pickNearestSlug, haversineKm } from '../../services/location.js';
+import { getActiveSlug } from '../../services/trip-context.js';
 
 const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas', food: 'Food', guide: 'Guides' };
 const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area', 'food', 'guide'];
@@ -13,6 +14,33 @@ let userPicked = false;
 let gpsAttempted = false;
 let gpsResult = null;     // last successful GPS sample, or null on denial
 
+// Smart-revert override storage. Trip-scoped so switching trips doesn't
+// reuse a stale pick. Cleared automatically when (a) the day rolls over or
+// (b) the user has moved more than ~2 km from the basis GPS.
+const REVERT_KM = 2;
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function overrideKey(tripSlug) { return `tv-phone-area-override:${tripSlug || '_'}`; }
+function loadOverride(tripSlug) {
+  try {
+    const raw = localStorage.getItem(overrideKey(tripSlug));
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || typeof o.slug !== 'string' || typeof o.basisDate !== 'string') return null;
+    return o;
+  } catch { return null; }
+}
+function saveOverride(tripSlug, slug, gps) {
+  try {
+    const payload = { slug, basisDate: todayISO() };
+    if (gps && typeof gps.lat === 'number' && typeof gps.lon === 'number') payload.basisGps = gps;
+    localStorage.setItem(overrideKey(tripSlug), JSON.stringify(payload));
+  } catch (err) { console.error('[wiki-ui] saveOverride failed:', err.message); }
+}
+function clearOverride(tripSlug) {
+  try { localStorage.removeItem(overrideKey(tripSlug)); }
+  catch (err) { console.error('[wiki-ui] clearOverride failed:', err.message); }
+}
+
 export function setupWikiTab() {
   // Legacy search input is hidden in the shell behind [hidden] but still
   // wired so re-surfacing it is a one-line markup change.
@@ -22,6 +50,7 @@ export function setupWikiTab() {
   if (sel) sel.addEventListener('change', e => {
     selectedSlug = e.target.value || '';
     userPicked = true;
+    saveOverride(getActiveSlug(), selectedSlug, gpsResult);
     renderWikiList((search?.value || '').toLowerCase().trim());
   });
   $('article-back').addEventListener('click', () => $('wiki-article').classList.remove('open'));
@@ -70,15 +99,65 @@ export function rebuildAreaSet() {
   }
   areaSet.sort((a, b) => a.area_path_display.localeCompare(b.area_path_display));
 
+  // Re-evaluate the active filter from scratch on every load — override
+  // first (if still valid by date), else clear to '' so applyNearMe picks
+  // the GPS-nearest area on the next call.
+  resolveOverrideOrReset();
   populateAreaSelect();
 }
 
-// "Near me" on phone = nearest area page (by Haversine) to the user's GPS.
-// Sample once per session — browsers persist permission for a while, but the
-// in-app permission prompt UX is jarring to repeat. B.4 will add the
-// >2 km basis-shift / day-rollover re-evaluation.
+// Day-rollover revert + override-still-applies check. GPS-shift revert is
+// deferred until we actually have a fresh GPS sample (in applyNearMe).
+function resolveOverrideOrReset() {
+  const tripSlug = getActiveSlug();
+  const override = loadOverride(tripSlug);
+  if (!override) {
+    selectedSlug = ''; userPicked = false;
+    return;
+  }
+  if (override.basisDate !== todayISO()) {
+    clearOverride(tripSlug);
+    selectedSlug = ''; userPicked = false;
+    return;
+  }
+  if (override.slug !== '' && !areaSet.some(a => a.slug === override.slug)) {
+    // Stale override slug (page deleted, area renamed, trip reset) — drop it.
+    clearOverride(tripSlug);
+    selectedSlug = ''; userPicked = false;
+    return;
+  }
+  selectedSlug = override.slug;
+  userPicked = true;
+}
+
+// "Near me" + smart-revert. On phone the GPS sample serves two purposes:
+// (a) check whether an active override has drifted >2 km from its basis
+// (smart-revert), and (b) pick the nearest area when no override is active.
+// Sample once per session — permission prompts shouldn't repeat.
 export async function applyNearMe() {
+  const tripSlug = getActiveSlug();
+
+  // GPS-shift smart-revert: only relevant if the active override has a
+  // basisGps to compare against. Sample lazily.
+  if (userPicked) {
+    const override = loadOverride(tripSlug);
+    if (override && override.basisGps) {
+      if (!gpsAttempted) {
+        gpsAttempted = true;
+        gpsResult = await sampleGps({ timeout: 8000, maximumAge: 5 * 60_000 });
+      }
+      if (gpsResult && haversineKm(override.basisGps, gpsResult) > REVERT_KM) {
+        clearOverride(tripSlug);
+        userPicked = false;
+        selectedSlug = '';
+        // Fall through to the near-me branch below so the dropdown gets a
+        // fresh default, not just an empty "All areas".
+      }
+    }
+  }
+
   if (userPicked || selectedSlug) return;
+
   if (!gpsAttempted) {
     gpsAttempted = true;
     gpsResult = await sampleGps({ timeout: 8000, maximumAge: 5 * 60_000 });
