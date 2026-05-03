@@ -5,8 +5,8 @@ import { s } from '../../core/state.js';
 import { sample as sampleGps, pickNearestSlug, haversineKm } from '../../services/location.js';
 import { getActiveSlug } from '../../services/trip-context.js';
 
-const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas', food: 'Food', guide: 'Guides' };
-const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area', 'food', 'guide'];
+const TYPE_LABEL = { hotel: 'Hotels', restaurant: 'Restaurants', activity: 'Activities', transport: 'Transport', area: 'Areas', landmark: 'Landmarks', food: 'Food', guide: 'Guides' };
+const TYPE_ORDER = ['hotel', 'restaurant', 'activity', 'transport', 'area', 'landmark', 'food', 'guide'];
 
 let selectedSlug = '';
 let areaSet = [];   // [{ slug, name, area_path, area_path_display, has_page }]

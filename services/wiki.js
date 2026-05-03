@@ -13,6 +13,7 @@ const FOLDERS = {
   areas:       'area',
   food:        'food',
   guides:      'guide',
+  landmarks:   'landmark',
 };
 
 export async function loadWikiPages() {
