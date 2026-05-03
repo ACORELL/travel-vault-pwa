@@ -52,6 +52,30 @@ function byT(a, b) {
   return (a.t || '').localeCompare(b.t || '');
 }
 
+// Trigger a silent download of the full-res capture so the bytes survive
+// beyond the thumb-only upload. Filename uses the entry comment slug when
+// available, falling back to HHMMSS.
+function saveFullResToDevice(file, date, comment, t, ext) {
+  try {
+    const slug = (comment || '').toLowerCase()
+      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+    const tail = slug || (t || '').slice(11, 19).replace(/:/g, '');
+    const filename = `travel-vault_${date}_${tail}.${ext || 'jpg'}`;
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    console.error('Full-res device save failed:', e);
+  }
+}
+
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 export function setupLogTab() {
@@ -361,6 +385,7 @@ async function submitPhoto() {
     const hms  = t.slice(11, 19).replace(/:/g, '');
     const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
     const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    saveFullResToDevice(file, date, comment, t, ext);
     const resolved = await resolveGpsAndMaybeCheckin({ date, gps: gps || null, t, author: s.author });
     const cached = await getCached(date);
     const id   = makeId(t, s.author, cached?.entries || []);
@@ -375,11 +400,19 @@ async function submitPhoto() {
   } else if (c.kind === 'edit-photo') {
     const entryId = c.entryId;
     const replacedFile = c.replacedFile || null;
+    if (replacedFile) {
+      const ext = (replacedFile.name?.split('.').pop() || 'jpg').toLowerCase();
+      saveFullResToDevice(replacedFile, date, comment, nowLocalIso(), ext);
+    }
     closePhotoForm();
     await commitEditPhoto(date, entryId, { comment }, replacedFile);
   } else if (c.kind === 'edit-appendment-photo') {
     const { parentId, appId } = c;
     const replacedFile = c.replacedFile || null;
+    if (replacedFile) {
+      const ext = (replacedFile.name?.split('.').pop() || 'jpg').toLowerCase();
+      saveFullResToDevice(replacedFile, date, comment, nowLocalIso(), ext);
+    }
     closePhotoForm();
     await commitEditAppendmentPhoto(date, parentId, appId, { comment }, replacedFile);
   } else if (c.kind === 'append-photo') {
@@ -388,6 +421,7 @@ async function submitPhoto() {
     const hms  = t.slice(11, 19).replace(/:/g, '');
     const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
     const ref  = `${date}_${hms}_${s.author}.${ext}`;
+    saveFullResToDevice(file, date, comment, t, ext);
     const resolved = await resolveGpsAndMaybeCheckin({ date, gps: gps || null, t, author: s.author });
     const cached = await getCached(date);
     const id   = makeId(t, s.author, cached?.entries || []);
