@@ -340,7 +340,34 @@ export function deleteEntry(date, id, refSink = []) {
         if (a.ref) refSink.push(a.ref);
       }
     }
-    return xs.filter(e => e.id !== id);
+    return rewriteOrphanedGroupRefs(xs.filter(e => e.id !== id));
+  });
+}
+
+// Anchor-deletion rewrite (Phase 2 — plans/GROUPING-PLAN.md §2 "Anchor
+// deletion"). After any deletion, scan survivors for groupId values that
+// point at a now-deleted entry; re-anchor each such orphaned group by
+// promoting the earliest-by-t surviving member. Generic over single and
+// batch deletes (deleteEntry, deleteMany). Members whose anchor was NOT
+// deleted are untouched — their groupId still resolves cleanly.
+function rewriteOrphanedGroupRefs(entries) {
+  const ids = new Set(entries.map(e => e.id));
+  const orphans = new Set();
+  for (const e of entries) {
+    if (e.groupId && !ids.has(e.groupId)) orphans.add(e.groupId);
+  }
+  if (!orphans.size) return entries;
+  const newAnchorByOldId = new Map();
+  for (const oldAnchor of orphans) {
+    const survivors = entries.filter(e => e.groupId === oldAnchor);
+    if (!survivors.length) continue;       // singleton anchor, no members
+    survivors.sort(byT);
+    newAnchorByOldId.set(oldAnchor, survivors[0].id);
+  }
+  if (!newAnchorByOldId.size) return entries;
+  return entries.map(e => {
+    if (!e.groupId || !newAnchorByOldId.has(e.groupId)) return e;
+    return { ...e, groupId: newAnchorByOldId.get(e.groupId) };
   });
 }
 
@@ -389,7 +416,7 @@ export function deleteMany(date, idsToRemove, refSink = []) {
         if (a.ref) refSink.push(a.ref);
       }
     }
-    return xs.filter(e => !ids.has(e.id));
+    return rewriteOrphanedGroupRefs(xs.filter(e => !ids.has(e.id)));
   });
 }
 

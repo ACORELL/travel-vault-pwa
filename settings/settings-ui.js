@@ -3,7 +3,7 @@
 // Owns the #settings-overlay markup in index.html.
 
 import * as settings from '../services/settings.js';
-import { GITHUB_PAT, GITHUB_REPO, AUTHOR } from '../services/settings.js';
+import { GITHUB_PAT, GITHUB_REPO, AUTHOR, GROUP_WINDOW_MIN, getGroupWindowMinutes } from '../services/settings.js';
 import { getFile, GitHubAuthError, GitHubNotFoundError } from '../services/github.js';
 import * as queue from '../services/queue.js';
 import { restoreFromRepo } from '../services/restore.js';
@@ -31,6 +31,7 @@ function populateInputs() {
   $('settings-pat').value    = settings.get(GITHUB_PAT)  || '';
   $('settings-repo').value   = settings.get(GITHUB_REPO) || '';
   $('settings-author').value = settings.get(AUTHOR)      || '';
+  $('settings-group-window').value = String(getGroupWindowMinutes());
   populateTripSelect();
 }
 
@@ -65,6 +66,15 @@ function saveInputs() {
   settings.set(GITHUB_REPO, $('settings-repo').value.trim());
   const author = $('settings-author').value.trim().toUpperCase();
   if (author === 'N' || author === 'A') settings.set(AUTHOR, author);
+  const winRaw = $('settings-group-window').value.trim();
+  const winN = parseInt(winRaw, 10);
+  if (Number.isFinite(winN) && winN >= 1 && winN <= 240) {
+    settings.set(GROUP_WINDOW_MIN, String(winN));
+  } else if (winRaw === '') {
+    // Empty input → clear back to default. Removing the key makes
+    // getGroupWindowMinutes return the 10-min fallback.
+    settings.set(GROUP_WINDOW_MIN, '');
+  }
   // Trip selector — switch active slug if it changed. setActiveSlug emits
   // 'trip-changed' which downstream listeners can use to clear caches.
   const sel = $('settings-trip');

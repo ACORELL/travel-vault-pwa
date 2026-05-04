@@ -87,6 +87,20 @@ export async function renderLog() {
   const [pIds, pRefs] = await Promise.all([pendingIds(), pendingThumbRefs()]);
 
   let groupAuthor = null;
+  // Phase 2 grouping tie: walk entries in order; when consecutive entries
+  // share an explicit group (their resolved anchor matches), the second
+  // gets `is-grouped-with-prev` for the continuous-tie visual. The anchor
+  // entry of any explicit group with ≥1 member also gets `is-group-anchor`
+  // so the tie starts from a marked head rather than appearing mid-list.
+  // memberCounts is one pass up front so each entry can ask "is my group
+  // size > 1?" without re-scanning.
+  const memberCounts = new Map();
+  for (const e of s.logEntries) {
+    const gk = e.groupId || null;
+    if (!gk) continue;
+    memberCounts.set(gk, (memberCounts.get(gk) || 0) + 1);
+  }
+  let prevGroupAnchor = null;
 
   for (const entry of s.logEntries) {
     const li = document.createElement('li');
@@ -142,6 +156,20 @@ export async function renderLog() {
       appsBox.innerHTML = appsInner;
       li.appendChild(appsBox);
     }
+
+    // Phase 2 grouping tie. Anchor of an explicit group with members → mark
+    // its row so the tie has a visible head. Member of an explicit group whose
+    // immediately-previous rendered row resolves to the same anchor →
+    // continuous-tie class. Check-ins have their own treatment so they don't
+    // carry the tie even if they happen to fall inside a group window
+    // (which they won't, per the cross-check-in rule).
+    const groupAnchor = entry.groupId || null;
+    if (entry.type !== 'checkin' && groupAnchor && memberCounts.get(groupAnchor) > 1) {
+      const isAnchor = entry.id === groupAnchor;
+      if (isAnchor) li.classList.add('is-group-anchor');
+      else if (prevGroupAnchor === groupAnchor) li.classList.add('is-grouped-with-prev');
+    }
+    prevGroupAnchor = entry.type === 'checkin' ? null : groupAnchor;
 
     // Tap-to-open the detail view. detail.js subscribes to this event.
     li.addEventListener('click', () => {

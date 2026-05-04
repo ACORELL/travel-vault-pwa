@@ -124,6 +124,33 @@ async function renderDetail() {
   $('entry-detail-parent').innerHTML      = await parentHtml(entry);
   $('entry-detail-actions').innerHTML     = parentActionsHtml(entry);
   $('entry-detail-appendments').innerHTML = await appendmentsHtml(entry.appendments || []);
+  renderGroupFooter(entry, entries);
+}
+
+// Group-membership footer (Phase 2 — plans/GROUPING-PLAN.md §3 "Visual
+// treatment"). Hidden when the entry isn't part of a multi-member group.
+// When shown: "Part of HH:MM moment · N entries"; tapping closes the sheet
+// and scrolls the underlying log to the anchor.
+function renderGroupFooter(entry, entries) {
+  const footer = $('entry-detail-group-footer');
+  if (!footer) return;
+  const anchorId = entry.groupId || null;
+  if (!anchorId) { footer.hidden = true; return; }
+  const members = entries.filter(e => (e.groupId || null) === anchorId);
+  if (members.length < 2) { footer.hidden = true; return; }
+  const anchor = entries.find(e => e.id === anchorId) || members[0];
+  const anchorTime = (anchor.t || '').slice(11, 16);
+  footer.innerHTML = `
+    <span>Part of <span class="entry-detail-group-footer-time">${anchorTime}</span> moment · ${members.length} entries</span>
+    <span style="opacity:.6">→</span>`;
+  footer.hidden = false;
+  footer.onclick = () => {
+    closeDetail();
+    requestAnimationFrame(() => {
+      const li = document.querySelector(`#log-list li[data-entry-id="${anchorId}"]`);
+      if (li) li.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
 }
 
 async function parentHtml(entry) {

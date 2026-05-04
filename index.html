@@ -98,6 +98,38 @@
     .add-bar #btn-checkin:disabled { border-color: var(--border); color: var(--muted); opacity: 1; }
     .add-bar-hint { font-size: 12px; color: var(--muted); text-align: center; padding: 5px 0 2px; margin: 0; display: none; }
 
+    /* ---- + More button + picker (Phase 2 grouping) ---- */
+    .add-bar #btn-add-more { flex: 0 0 auto; padding: 11px 12px; border-color: #4a8fc8; color: #4a8fc8; font-weight: 600; }
+    .add-bar #btn-add-more #btn-add-more-time { font-family: 'Courier New', monospace; font-size: 12px; opacity: .8; margin-left: 2px; }
+    #more-picker { display: flex; align-items: center; gap: 6px; padding: 10px 8px 0; flex-wrap: wrap; }
+    #more-picker[hidden] { display: none; }
+    #more-picker-label { font-size: 12px; color: #555; flex: 1 0 100%; margin-bottom: 4px; }
+    #more-picker-time { font-family: 'Courier New', monospace; font-weight: 600; color: #4a8fc8; }
+    #more-picker button { padding: 9px 14px; border: 1.5px solid #4a8fc8; border-radius: 8px; background: none; color: #4a8fc8; font-size: 13px; font-family: inherit; cursor: pointer; font-weight: 500; }
+    #more-picker #more-picker-cancel { border-color: var(--border); color: var(--muted); padding: 9px 12px; }
+    #more-picker button:active { background: rgba(74,143,200,0.08); }
+
+    /* Group banner inside note/photo composers (Phase 2 grouping) */
+    .group-banner { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(74,143,200,0.10); border: 1px solid rgba(74,143,200,0.35); border-radius: 8px; font-size: 13px; color: #1a4870; }
+    .group-banner[hidden] { display: none; }
+    .group-banner > span:first-child { flex: 1; }
+    .group-banner-time { font-family: 'Courier New', monospace; font-weight: 700; }
+    .group-banner-detach { background: none; border: none; color: #1a4870; font-size: 16px; cursor: pointer; padding: 2px 6px; line-height: 1; font-family: inherit; opacity: .7; }
+    .group-banner-detach:active { opacity: 1; }
+
+    /* Grouped-with-previous tie on the log list (Phase 2 grouping).
+       The 4px left border on the log entry is what visually links a member
+       to its anchor. Negative top margin closes the gap so the tie reads as
+       a continuous bar across the run. */
+    .log-entry.is-grouped-with-prev { border-left: 3px solid #4a8fc8; padding-left: 9px; margin-left: 0; margin-top: -1px; }
+    .log-entry.is-group-anchor { border-left: 3px solid #4a8fc8; padding-left: 9px; }
+
+    /* Detail-view group footer (Phase 2 grouping) */
+    .entry-detail-group-footer { margin-top: 12px; padding: 10px 12px; background: rgba(74,143,200,0.08); border-radius: 8px; font-size: 13px; color: #1a4870; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .entry-detail-group-footer[hidden] { display: none; }
+    .entry-detail-group-footer:active { background: rgba(74,143,200,0.16); }
+    .entry-detail-group-footer-time { font-family: 'Courier New', monospace; font-weight: 700; }
+
     /* ---- Pending draft ---- */
     #pending-draft { padding: 10px 0 2px; }
     .pending-msg { font-size: 13px; color: #92400e; font-weight: 500; margin-bottom: 4px; }
@@ -422,6 +454,13 @@
           <button id="btn-checkin">📍 Check in</button>
           <button id="btn-add-note" disabled>+ Note</button>
           <button id="btn-add-photo" disabled>+ Photo</button>
+          <button id="btn-add-more" hidden>+ More <span id="btn-add-more-time"></span></button>
+        </div>
+        <div id="more-picker" hidden>
+          <span id="more-picker-label">Adding to <span id="more-picker-time"></span> moment:</span>
+          <button id="more-picker-note" type="button">+ Note</button>
+          <button id="more-picker-photo" type="button">+ Photo</button>
+          <button id="more-picker-cancel" type="button" aria-label="Cancel">✕</button>
         </div>
         <p id="add-bar-hint" class="add-bar-hint">Check in first to add notes and photos</p>
         <div id="pending-draft" style="display:none">
@@ -469,6 +508,10 @@
     <button id="note-confirm" class="confirm" disabled>Add</button>
   </div>
   <div class="fsbody">
+    <div id="note-group-banner" class="group-banner" hidden>
+      <span>Adding to <span class="group-banner-time"></span> moment</span>
+      <button type="button" class="group-banner-detach" aria-label="Detach from group">✕</button>
+    </div>
     <textarea id="note-text" rows="6" placeholder="What's happening…"></textarea>
   </div>
 </div>
@@ -481,6 +524,10 @@
     <button id="photo-confirm" class="confirm" disabled>Add</button>
   </div>
   <div class="fsbody">
+    <div id="photo-group-banner" class="group-banner" hidden>
+      <span>Adding to <span class="group-banner-time"></span> moment</span>
+      <button type="button" class="group-banner-detach" aria-label="Detach from group">✕</button>
+    </div>
     <img id="photo-preview" class="photo-preview-img" alt="" hidden>
     <div id="photo-preview-meta" class="photo-preview-meta" hidden></div>
     <button id="photo-replace" type="button" hidden>Replace photo</button>
@@ -500,6 +547,7 @@
     <div id="entry-detail-actions"></div>
     <hr class="entry-detail-divider">
     <div id="entry-detail-appendments"></div>
+    <div id="entry-detail-group-footer" class="entry-detail-group-footer" hidden></div>
   </div>
   <div class="entry-detail-bottom">
     <button id="entry-detail-add-comment">+ Comment</button>
@@ -560,6 +608,12 @@
       <label for="settings-trip">Trip</label>
       <select id="settings-trip"></select>
       <span class="settings-field-hint">Switch the active trip. Lifecycle (create / rename / archive) is laptop-only.</span>
+    </div>
+
+    <div class="settings-field">
+      <label for="settings-group-window">Group window (minutes)</label>
+      <input id="settings-group-window" type="number" min="1" max="240" step="1" inputmode="numeric" placeholder="10">
+      <span class="settings-field-hint">After an entry, the "+ More" button extends grouping for this many minutes. Default 10.</span>
     </div>
 
     <p id="settings-status" class="settings-status" style="display:none"></p>

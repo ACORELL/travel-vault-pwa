@@ -15,6 +15,7 @@
 import { $, show, hide } from '../../core/ui.js';
 import { s, TODAY } from '../../core/state.js';
 import * as geoloc from '../../services/location.js';
+import { getGroupWindowMinutes } from '../../services/settings.js';
 import {
   addEntry, editEntry, deleteEntry,
   addAppendment, editAppendment, deleteAppendment,
@@ -76,6 +77,87 @@ function saveFullResToDevice(file, date, comment, t, ext) {
   }
 }
 
+// ─── Active anchor (Phase 2 — capture-time grouping) ─────────────────────────
+//
+// Module-level state holding the most-recent non-checkin add. Every add
+// (note/photo, top-level or appendment) sets it; check-ins / page reloads /
+// day-nav-away / manual detach / N-minute stale window clear it. While set,
+// the action bar exposes a fourth "+ More" button that, when tapped,
+// presents a sub-picker (Note / Photo) and stamps the new entry's `groupId`
+// to the active anchor's id — joining the explicit group rather than
+// starting a fresh moment.
+//
+// Per plans/GROUPING-PLAN.md §3 decisions: opt-in only — `+ Note` /
+// `+ Photo` always start fresh. The `+ More` gesture is the explicit
+// extend signal. The 10-min default stale window keeps an old anchor from
+// silently capturing an unrelated add an hour later.
+
+let activeAnchor = null;          // { id, t } or null
+let activeAnchorTimer = null;     // setTimeout handle
+
+function getStaleWindowMs() {
+  return getGroupWindowMinutes() * 60 * 1000;
+}
+
+function setActiveAnchor(id, t) {
+  activeAnchor = { id, t };
+  if (activeAnchorTimer) clearTimeout(activeAnchorTimer);
+  activeAnchorTimer = setTimeout(() => clearActiveAnchor(), getStaleWindowMs());
+  renderMoreButton();
+}
+
+function extendActiveAnchorWindow() {
+  if (!activeAnchor) return;
+  if (activeAnchorTimer) clearTimeout(activeAnchorTimer);
+  activeAnchorTimer = setTimeout(() => clearActiveAnchor(), getStaleWindowMs());
+}
+
+function clearActiveAnchor() {
+  if (activeAnchorTimer) { clearTimeout(activeAnchorTimer); activeAnchorTimer = null; }
+  activeAnchor = null;
+  renderMoreButton();
+  hideMorePicker();
+}
+
+export function getActiveAnchor() {
+  return activeAnchor ? { ...activeAnchor } : null;
+}
+
+function renderMoreButton() {
+  const btn  = $('btn-add-more');
+  const time = $('btn-add-more-time');
+  if (!btn) return;
+  const isToday = s.viewedDate === TODAY;
+  if (!isToday || !activeAnchor) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  if (time) time.textContent = (activeAnchor.t || '').slice(11, 16);
+}
+
+function showMorePicker() {
+  if (!activeAnchor) return;
+  $('more-picker-time').textContent = (activeAnchor.t || '').slice(11, 16);
+  $('more-picker').hidden = false;
+}
+
+function hideMorePicker() {
+  const el = $('more-picker');
+  if (el) el.hidden = true;
+}
+
+function syncGroupBanner(formId, groupId) {
+  const banner = $(formId);
+  if (!banner) return;
+  if (!groupId || !activeAnchor || activeAnchor.id !== groupId) {
+    banner.hidden = true;
+    return;
+  }
+  banner.querySelector('.group-banner-time').textContent = (activeAnchor.t || '').slice(11, 16);
+  banner.hidden = false;
+}
+
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 export function setupLogTab() {
@@ -95,6 +177,35 @@ export function setupLogTab() {
     $('photo-confirm').disabled = !$('photo-comment').value.trim();
   });
   $('photo-replace').addEventListener('click', () => $('photo-input').click());
+
+  // + More: extend the active anchor by adding into its group. Picker shows
+  // [Note] [Photo] [Cancel]; selection opens the matching composer
+  // pre-tagged with composing.groupId.
+  $('btn-add-more').addEventListener('click', () => {
+    if (!activeAnchor) { hideMorePicker(); return; }
+    showMorePicker();
+  });
+  $('more-picker-cancel').addEventListener('click', hideMorePicker);
+  $('more-picker-note').addEventListener('click', () => {
+    hideMorePicker();
+    openNoteForm({ groupId: activeAnchor?.id || null });
+  });
+  $('more-picker-photo').addEventListener('click', () => {
+    hideMorePicker();
+    s.composing = { kind: 'add-photo-pending', groupId: activeAnchor?.id || null };
+    $('photo-input').click();
+  });
+  // Group banner detach: drop the staged groupId on the open composer.
+  // Visually the banner hides immediately; on submit, the entry lands as
+  // a fresh singleton (and replaces the active anchor as usual).
+  for (const formId of ['note-group-banner', 'photo-group-banner']) {
+    const banner = $(formId);
+    if (!banner) continue;
+    banner.querySelector('.group-banner-detach').addEventListener('click', () => {
+      if (s.composing) s.composing.groupId = null;
+      banner.hidden = true;
+    });
+  }
 
   $('day-prev').addEventListener('click', () => navigateDay(-1));
   $('day-next').addEventListener('click', () => navigateDay(1));
@@ -130,6 +241,10 @@ export function setupLogTab() {
   // Re-render when the ops queue changes so per-entry debug badges
   // (synced / pending / thumb) reflect the latest queue state.
   window.addEventListener('ops-changed', () => loadLog());
+
+  // Initial state: no active anchor → "+ More" hidden, picker hidden.
+  renderMoreButton();
+  hideMorePicker();
 }
 
 // ─── GPS / check-in coupling ──────────────────────────────────────────────────
@@ -225,6 +340,11 @@ async function addCheckin() {
       id, type: 'checkin', author: s.author, t,
       gps: gps ? { lat: gps.lat, lon: gps.lon } : null,
     };
+    // A new check-in is the trip's location heartbeat — always breaks the
+    // active moment. Per plans/GROUPING-PLAN.md §3 ("Active-anchor
+    // lifecycle"), check-in clears the active anchor and does NOT become
+    // one itself; the next + Note / + Photo starts a fresh anchor.
+    clearActiveAnchor();
     await commitAdd(s.viewedDate, entry);
   } finally {
     btn.disabled = false;
@@ -232,11 +352,15 @@ async function addCheckin() {
   }
 }
 
-function openNoteForm() {
-  s.composing = { kind: 'add-note' };
+function openNoteForm(opts = {}) {
+  // opts.groupId is set when the user reached this form via "+ More" — the
+  // banner inside the form surfaces the active anchor's HH:MM and offers
+  // a detach button. The default {} keeps existing call sites working.
+  s.composing = { kind: 'add-note', groupId: opts.groupId || null };
   $('note-text').value = '';
   $('note-confirm').disabled = true;
   $('note-confirm').textContent = 'Add';
+  syncGroupBanner('note-group-banner', s.composing.groupId);
   show('note-form');
   $('note-text').focus();
 }
@@ -244,6 +368,7 @@ function openNoteForm() {
 function closeNoteForm() {
   hide('note-form');
   $('note-text').value = '';
+  $('note-group-banner').hidden = true;
   s.composing = null;
 }
 
@@ -269,6 +394,7 @@ async function submitNote() {
       content: text,
       gps: resolved.gps,
     };
+    if (c.groupId) entry.groupId = c.groupId;
     closeNoteForm();
     if (resolved.mintedCheckin) await commitAdd(date, resolved.mintedCheckin);
     await commitAdd(date, entry);
@@ -319,10 +445,14 @@ async function onPhotoSelected(e) {
 
   const t = nowLocalIso();
   // append-photo: parentId was preset by startAddAppendmentPhoto; we layer
-  // file + t on top. add-photo (no preset): build from scratch.
+  // file + t on top. add-photo-pending: "+ More → Photo" pre-staged the
+  // groupId; upgrade to add-photo and preserve it. add-photo (no preset):
+  // build from scratch (a fresh, ungrouped capture).
   if (s.composing?.kind === 'append-photo') {
     s.composing.file = file;
     s.composing.t = t;
+  } else if (s.composing?.kind === 'add-photo-pending') {
+    s.composing = { kind: 'add-photo', file, t, groupId: s.composing.groupId || null };
   } else {
     s.composing = { kind: 'add-photo', file, t };
   }
@@ -353,6 +483,7 @@ async function onPhotoSelected(e) {
   $('photo-confirm').disabled = true;
   $('photo-confirm').textContent = 'Add';
   $('photo-replace').hidden = true;
+  syncGroupBanner('photo-group-banner', s.composing?.groupId || null);
   show('photo-form');
 }
 
@@ -366,6 +497,7 @@ function closePhotoForm() {
   prev.hidden = true;
   $('photo-preview-meta').hidden = true;
   $('photo-replace').hidden = true;
+  $('photo-group-banner').hidden = true;
   s.composing = null;
 }
 
@@ -394,6 +526,7 @@ async function submitPhoto() {
       ref, comment,
       gps: resolved.gps,
     };
+    if (c.groupId) entry.groupId = c.groupId;
     closePhotoForm();
     if (resolved.mintedCheckin) await commitAdd(date, resolved.mintedCheckin);
     await commitAddPhoto(date, entry, file);
@@ -628,6 +761,7 @@ async function commitAdd(date, entry) {
   // preserves it from cache instead of wiping it.
   addPendingAdd(date, entry.id);
   await applyOptimistic(date, xs => [...xs, entry].sort(byT));
+  applyAnchorLifecycle(entry);
   try {
     await addEntry(date, entry);
   } catch (e) {
@@ -636,11 +770,30 @@ async function commitAdd(date, entry) {
   }
 }
 
+// Active-anchor lifecycle on a successful top-level add (Phase 2).
+// Check-ins always clear (heartbeat moved on). Note/photo whose groupId
+// matches the current active anchor extends the stale window without
+// changing identity ("+ More"). Any other note/photo replaces the anchor —
+// it is now the head of a fresh moment.
+function applyAnchorLifecycle(entry) {
+  if (s.viewedDate !== TODAY) return;     // only today is "live capture"
+  if (entry.type === 'checkin') {
+    clearActiveAnchor();
+    return;
+  }
+  if (entry.groupId && activeAnchor && entry.groupId === activeAnchor.id) {
+    extendActiveAnchorWindow();
+    return;
+  }
+  setActiveAnchor(entry.id, entry.t);
+}
+
 async function commitAddPhoto(date, entry, file) {
   const blob = await generateFromFile(file);
   await storeLocal(entry.ref, blob);
   addPendingAdd(date, entry.id);
   await applyOptimistic(date, xs => [...xs, entry].sort(byT));
+  applyAnchorLifecycle(entry);
 
   // Thumb first so the timeline.json never points at a missing file. If the
   // thumb upload fails (non-auth), queue both ops in order — entry can't
@@ -972,6 +1125,9 @@ async function navigateDay(dir) {
   const newIdx = idx + dir;
   if (newIdx < 0 || newIdx >= s.availableDays.length) return;
   s.viewedDate = s.availableDays[newIdx];
+  // Active anchor only makes sense for today's live capture — leaving today
+  // resets it so a stale anchor can't haunt a re-navigation later.
+  clearActiveAnchor();
   // Listeners (e.g. trip header's "Day X of Y") use this to re-render.
   window.dispatchEvent(new CustomEvent('viewed-day-changed', { detail: { date: s.viewedDate } }));
   await loadLog();

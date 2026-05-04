@@ -19,7 +19,7 @@ import { daysPath, getActiveSlug } from './trip-context.js';
 async function listDates() {
   try {
     // Lists the dates in the *active trip*'s days/ folder. Switching trips
-    // requires a re-restore — that's intentional, see /vault/pipeline/TRIP-MANAGEMENT-PLAN.md.
+    // requires a re-restore — that's intentional, see /vault/plans/TRIP-MANAGEMENT-PLAN.md.
     const items = await listDir(`${getActiveSlug()}/days`);
     return items
       .filter(i => i.type === 'dir' && /^\d{4}-\d{2}-\d{2}$/.test(i.name))
