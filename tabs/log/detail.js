@@ -141,7 +141,7 @@ function renderGroupFooter(entry, entries) {
   const anchor = entries.find(e => e.id === anchorId) || members[0];
   const anchorTime = (anchor.t || '').slice(11, 16);
   footer.innerHTML = `
-    <span>Part of <span class="entry-detail-group-footer-time">${anchorTime}</span> moment · ${members.length} entries</span>
+    <span>Part of <span class="entry-detail-group-footer-time">${esc(anchorTime)}</span> moment · ${members.length} entries</span>
     <span style="opacity:.6">→</span>`;
   footer.hidden = false;
   footer.onclick = () => {
