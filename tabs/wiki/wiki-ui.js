@@ -68,18 +68,40 @@ export function rebuildAreaSet() {
   const areaPageBySlug = new Map();
   for (const p of s.wikiPages || []) if (p.type === 'area') areaPageBySlug.set(p.slug, p);
 
-  // area_path is top-down (region first, leaf last), so the ancestors of a
-  // slug are the PREFIX up to and including it — not the suffix from it. A
-  // wrong direction here turns intermediate slugs into root-level entries
-  // (see laptop /api/wiki/areas — same bug, same fix).
-  const inferredPath = new Map();
+  // Canonicalise each slug's ancestry across ALL observed area_paths.
+  // Longest chain ending at a slug wins (so when Claude omits a root level
+  // in one ingest — e.g. [hokuriku, fukui-prefecture, fukui-city] missing
+  // "chubu" — the deeper ancestry from another ingest is preferred). Single
+  // source of truth keeps the dropdown free of duplicate ancestries for
+  // the same slug.
+  const longestChainLen = new Map();
+  const parentOf = new Map();
   for (const p of s.wikiPages || []) {
     const ap = Array.isArray(p.area_path) ? p.area_path : [];
     for (let i = 0; i < ap.length; i++) {
       const slug = ap[i];
-      if (!inferredPath.has(slug)) inferredPath.set(slug, ap.slice(0, i + 1));
+      const len = i + 1;
+      const existing = longestChainLen.get(slug);
+      if (existing === undefined || len > existing) {
+        longestChainLen.set(slug, len);
+        parentOf.set(slug, i > 0 ? ap[i - 1] : null);
+      }
     }
   }
+  const canonicalCache = new Map();
+  const canonicalChain = (slug) => {
+    if (canonicalCache.has(slug)) return canonicalCache.get(slug);
+    const chain = [];
+    const visited = new Set();
+    let cur = slug;
+    while (cur && !visited.has(cur)) {
+      visited.add(cur);
+      chain.unshift(cur);
+      cur = parentOf.get(cur) || null;
+    }
+    canonicalCache.set(slug, chain);
+    return chain;
+  };
 
   const displayName = (slug) => {
     const page = areaPageBySlug.get(slug);
@@ -87,18 +109,17 @@ export function rebuildAreaSet() {
     return titleCaseSlug(slug);
   };
 
-  const allSlugs = new Set([...areaPageBySlug.keys(), ...inferredPath.keys()]);
+  const allSlugs = new Set([...areaPageBySlug.keys(), ...longestChainLen.keys()]);
   areaSet = [];
   for (const slug of allSlugs) {
     const page = areaPageBySlug.get(slug);
-    const areaPath = (page && Array.isArray(page.area_path) && page.area_path.length)
-      ? page.area_path
-      : (inferredPath.get(slug) || [slug]);
+    const areaPath = canonicalChain(slug);
+    const finalPath = areaPath.length ? areaPath : [slug];
     areaSet.push({
       slug,
       name: displayName(slug),
-      area_path: areaPath,
-      area_path_display: areaPath.map(displayName).join(' · '),
+      area_path: finalPath,
+      area_path_display: finalPath.map(displayName).join(' · '),
       has_page: !!page,
     });
   }
