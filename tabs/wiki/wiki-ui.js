@@ -68,12 +68,16 @@ export function rebuildAreaSet() {
   const areaPageBySlug = new Map();
   for (const p of s.wikiPages || []) if (p.type === 'area') areaPageBySlug.set(p.slug, p);
 
+  // area_path is top-down (region first, leaf last), so the ancestors of a
+  // slug are the PREFIX up to and including it — not the suffix from it. A
+  // wrong direction here turns intermediate slugs into root-level entries
+  // (see laptop /api/wiki/areas — same bug, same fix).
   const inferredPath = new Map();
   for (const p of s.wikiPages || []) {
     const ap = Array.isArray(p.area_path) ? p.area_path : [];
     for (let i = 0; i < ap.length; i++) {
       const slug = ap[i];
-      if (!inferredPath.has(slug)) inferredPath.set(slug, ap.slice(i));
+      if (!inferredPath.has(slug)) inferredPath.set(slug, ap.slice(0, i + 1));
     }
   }
 
@@ -280,10 +284,13 @@ function pageInArea(p, slug) {
 }
 
 function subAreaSlugFor(page, slug) {
+  // area_path is top-down (region → leaf), so the slug one level CLOSER to
+  // the leaf sits at idx+1, not idx-1. Returns null when this page is itself
+  // at the deepest position of the path (no sub-area below the selected one).
   const ap = page.area_path || [];
   const idx = ap.indexOf(slug);
-  if (idx <= 0) return null;
-  return ap[idx - 1];
+  if (idx < 0 || idx >= ap.length - 1) return null;
+  return ap[idx + 1];
 }
 
 export function renderWikiList(query) {

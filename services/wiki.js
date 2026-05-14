@@ -41,13 +41,15 @@ export async function loadWikiPages() {
   const pages = folderResults.flat();
 
   // Resolve each page's area_path leaf to a display name once (using the
-  // area pages' own `name` field, falling back to a title-cased slug). The
-  // wiki list and article cards read page.area_display directly so they
-  // don't need to re-derive on every render.
+  // area pages' own `name` field, falling back to a title-cased slug).
+  // area_path is top-down (region first, leaf last), so the leaf is the
+  // LAST element. The wiki list and article cards read page.area_display
+  // directly so they don't need to re-derive on every render.
   const areaNameBySlug = new Map();
   for (const p of pages) if (p.type === 'area') areaNameBySlug.set(p.slug, p.name);
   for (const p of pages) {
-    const leaf = Array.isArray(p.area_path) && p.area_path.length ? p.area_path[0] : '';
+    const leaf = Array.isArray(p.area_path) && p.area_path.length
+      ? p.area_path[p.area_path.length - 1] : '';
     p.area_display = leaf ? (areaNameBySlug.get(leaf) || titleCaseSlug(leaf)) : '';
   }
   return pages;
