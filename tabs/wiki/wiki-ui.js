@@ -293,10 +293,31 @@ function populateAreaSelect() {
   const sel = $('wiki-area');
   if (!sel) return;
   const current = selectedSlug;
-  sel.innerHTML = '<option value="">All areas</option>' + areaSet.map(a =>
-    `<option value="${esc(a.slug)}">${esc(a.area_path_display)}</option>`
-  ).join('');
-  if (current && areaSet.some(a => a.slug === current)) sel.value = current;
+
+  // Show only level-1 (region) and level-2 (subregion/prefecture) entries.
+  // Deeper levels — cities, districts — overflow the phone dropdown and
+  // are reachable via the accordion sub-area sections once the user has
+  // filtered by a prefecture, so they don't need separate dropdown rows.
+  // Sort by full canonical chain so a region clusters with its
+  // prefectures; prefectures are prefixed with an em-space + arrow so
+  // the hierarchy reads at a glance in the native <select>.
+  const visible = areaSet
+    .filter(a => Array.isArray(a.area_path) && a.area_path.length >= 1 && a.area_path.length <= 2)
+    .slice()
+    .sort((a, b) => a.area_path.join('').localeCompare(b.area_path.join('')));
+  const opts = visible.map(a => {
+    const isPrefecture = a.area_path.length === 2;
+    const label = isPrefecture ? ` ▸ ${a.name}` : a.name;
+    return `<option value="${esc(a.slug)}">${esc(label)}</option>`;
+  }).join('');
+
+  sel.innerHTML = '<option value="">All areas</option>' + opts;
+  // The dropdown reflects the active filter when it CAN — a deeper slug
+  // (e.g. a city set by Near-me GPS) is no longer a dropdown option, so
+  // the selector falls back to "All areas" while selectedSlug stays as
+  // the actual filter applied by renderWikiList.
+  if (current && visible.some(a => a.slug === current)) sel.value = current;
+  else if (current && areaSet.some(a => a.slug === current)) sel.value = '';
   else { sel.value = ''; selectedSlug = ''; }
 }
 
